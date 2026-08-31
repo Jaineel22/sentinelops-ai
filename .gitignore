@@ -1,0 +1,51 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments ---
+.venv/
+.venv-*/
+venv/
+env/
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Test / tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- ML artifacts (introduced in later phases) ---
+mlruns/
+mlartifacts/
+*.joblib
+*.pkl
+data/raw/
+data/interim/
+data/processed/
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Docker local state ---
+docker-compose.override.yml

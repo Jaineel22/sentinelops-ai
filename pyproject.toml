@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinelops-ai"
+version = "0.0.0"
+description = "ML-powered, cloud-native incident intelligence platform (Phase 0: development foundation)."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+authors = [{ name = "Jaineel Hemnani" }]
+keywords = ["observability", "incident-management", "anomaly-detection", "mlops", "agentic-ai"]
+classifiers = [
+    "Private :: Do Not Upload",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+# Phase 0 keeps the dependency surface intentionally small. ML, Kafka, LLM,
+# database, and observability libraries are added in the phases that use them.
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[project.urls]
+Repository = "https://github.com/Jaineel22/sentinelops-ai"
+
+[tool.hatch.build.targets.wheel]
+packages = ["apps/api/sentinelops_api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+pythonpath = ["apps/api"]
+filterwarnings = [
+    # Starlette's TestClient warns that it uses httpx; not actionable for us.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["apps/api", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["apps/api", "tests"]
+mypy_path = "apps/api"
