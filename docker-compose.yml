@@ -1,0 +1,10 @@
+# Phase 0 compose file: the API service only.
+# Databases, Kafka, and observability tooling arrive in later phases.
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+    restart: unless-stopped
