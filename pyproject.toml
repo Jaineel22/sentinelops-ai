@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "sentinelops-ai"
 version = "0.0.0"
-description = "ML-powered, cloud-native incident intelligence platform (Phase 0: development foundation)."
+description = "ML-powered, cloud-native incident intelligence platform (monorepo)."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
@@ -18,17 +18,25 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 
-# Phase 0 keeps the dependency surface intentionally small. ML, Kafka, LLM,
-# database, and observability libraries are added in the phases that use them.
+# The dependency surface grows one phase at a time. Phase 0 added FastAPI +
+# config. Phase 1 adds the Kafka client (aiokafka) and OpenTelemetry. ML, LLM,
+# and database libraries are still deferred to the phases that use them.
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "pydantic-settings>=2.4",
+    "aiokafka>=0.11",
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-instrumentation-fastapi>=0.46b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
+    "opentelemetry-exporter-prometheus>=0.46b0",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-asyncio>=0.23",
     "httpx>=0.27",
     "ruff>=0.6",
     "mypy>=1.11",
@@ -38,12 +46,19 @@ dev = [
 Repository = "https://github.com/Jaineel22/sentinelops-ai"
 
 [tool.hatch.build.targets.wheel]
-packages = ["apps/api/sentinelops_api"]
+packages = [
+    "apps/api/sentinelops_api",
+    "apps/orders-service/orders_service",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
-pythonpath = ["apps/api"]
+addopts = "-ra --import-mode=importlib -m 'not integration'"
+pythonpath = ["apps/api", "apps/orders-service"]
+asyncio_mode = "auto"
+markers = [
+    "integration: tests that need a running Kafka broker (deselected by default)",
+]
 filterwarnings = [
     # Starlette's TestClient warns that it uses httpx; not actionable for us.
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",
@@ -52,7 +67,7 @@ filterwarnings = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["apps/api", "tests"]
+src = ["apps/api", "apps/orders-service", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -60,5 +75,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["apps/api", "tests"]
-mypy_path = "apps/api"
+files = ["apps/api", "apps/orders-service", "tests", "scripts"]
+mypy_path = ["apps/api", "apps/orders-service"]
+
+[[tool.mypy.overrides]]
+# These ship incomplete or no type information.
+module = ["aiokafka.*", "opentelemetry.exporter.prometheus.*"]
+ignore_missing_imports = true
