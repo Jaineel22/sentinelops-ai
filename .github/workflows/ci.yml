@@ -38,12 +38,38 @@ jobs:
       - name: Type-check (mypy)
         run: mypy
 
-      - name: Tests (pytest)
+      - name: Unit tests (pytest)
         run: pytest
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Start Kafka
+        run: |
+          docker compose up -d kafka
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' sentinelops-ai-kafka-1)" = "healthy" ] && break
+            sleep 5
+          done
+          docker inspect -f '{{.State.Health.Status}}' sentinelops-ai-kafka-1
+      - name: Integration tests
+        run: KAFKA_BOOTSTRAP_SERVERS=localhost:29092 pytest -m integration
+      - if: always()
+        run: docker compose down -v
 
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -t sentinelops-ai:ci .
+      - name: Build platform API image
+        run: docker build -t sentinelops-ai:ci-api .
+      - name: Build orders-service image
+        run: docker build -f apps/orders-service/Dockerfile -t sentinelops-ai:ci-orders .

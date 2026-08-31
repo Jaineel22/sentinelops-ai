@@ -1,5 +1,14 @@
-# Phase 0 compose file: the API service only.
-# Databases, Kafka, and observability tooling arrive in later phases.
+# Phase 1 local environment:
+#   - api             the SentinelOps platform API (Phase 0)
+#   - kafka           single-node Kafka in KRaft mode (no ZooKeeper) — ADR-006
+#   - orders-service  demo app: HTTP -> order.created events -> Kafka + OTel
+#   - orders-consumer demo sink proving producer -> Kafka -> consumer works
+#
+# Start everything:            docker compose up --build
+# Just the event pipeline:     docker compose up --build kafka orders-service orders-consumer
+#
+# No PostgreSQL / Redis / Prometheus / Grafana / Loki / Tempo yet — later phases.
+
 services:
   api:
     build: .
@@ -7,4 +16,68 @@ services:
       - "8000:8000"
     environment:
       APP_ENV: development
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:3.9.1
+    ports:
+      - "29092:29092" # host access (traffic generator, integration tests)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  orders-service:
+    build:
+      context: .
+      dockerfile: apps/orders-service/Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      APP_ENV: development
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ORDERS_TOPIC: orders.events
+      OTEL_SERVICE_NAME: orders-service
+      # No collector in Phase 1; flip to true to see spans in the container logs.
+      OTEL_TRACES_CONSOLE_EXPORT: "false"
+      # Failure injection stays disabled by default (ADR-009).
+      ORDERS_SIMULATE_LATENCY_MS: "0"
+      ORDERS_SIMULATE_ERROR_RATE: "0.0"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  orders-consumer:
+    build:
+      context: .
+      dockerfile: apps/orders-service/Dockerfile
+    command: ["python", "-m", "orders_service.consumer"]
+    healthcheck:
+      disable: true # no HTTP server in the consumer; the image's default check does not apply
+    environment:
+      APP_ENV: development
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ORDERS_TOPIC: orders.events
+      OTEL_SERVICE_NAME: orders-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
     restart: unless-stopped
