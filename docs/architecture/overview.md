@@ -8,34 +8,48 @@ tracks what is actually built. It is updated at the end of every phase.
 - **IMPLEMENTED** — exists in the repository and is tested.
 - **PLANNED** — target design; no code yet.
 
-## Current state (Phase 0)
+## Current state (through Phase 1)
 
 **IMPLEMENTED**
 
-- A single FastAPI application (`apps/api/sentinelops_api`) with `GET /health`
-  and `GET /`.
-- Typed configuration via environment variables (`APP_` prefix).
-- Test, lint, type-check, Docker, and CI scaffolding.
+- **Phase 0:** platform API skeleton (`apps/api/sentinelops_api`) with
+  `GET /health` and `GET /`; typed env-var config; test/lint/type-check/Docker/CI
+  scaffolding.
+- **Phase 1:**
+  - `orders-service` (`apps/orders-service`) — a demo app under observation:
+    `POST /orders`, `GET /orders/{id}`, `/health`, `/ready`, `/metrics`,
+    dev-only `/admin/simulation`.
+  - Kafka event backbone: single-node KRaft broker in Docker Compose; topic
+    `orders.events`; versioned `order.created` event envelope
+    ([events.md](events.md)).
+  - OpenTelemetry instrumentation of `orders-service`: HTTP + business spans,
+    Prometheus-scraped metrics, structured JSON logs with trace correlation.
+  - A demo consumer proving producer → Kafka → consumer and trace continuation.
+  - Development-only failure injection + a traffic generator for reproducible
+    telemetry scenarios ([telemetry-scenarios.md](../development/telemetry-scenarios.md)).
 
-Nothing else below is implemented yet.
+See [phase-1.md](phase-1.md). Everything below not listed above is **PLANNED**.
 
 ## Target architecture
 
-### 1. Instrumented services — PLANNED
+### 1. Instrumented services — PARTIALLY IMPLEMENTED (Phase 1)
 
-Multiple small services emit telemetry (metrics, logs, traces) via
-**OpenTelemetry**. Collection uses an OpenTelemetry Collector / **Grafana Alloy**
-pipeline (not Promtail). The services are the system under observation; some
-synthetic/fault-injecting services exist to generate production-like incidents
-for evaluation.
+Small services emit telemetry (metrics, logs, traces) via **OpenTelemetry**.
+`orders-service` is the first — a demo app under observation, with built-in
+fault injection to generate production-like scenarios. More services, and an
+OpenTelemetry Collector / **Grafana Alloy** collection pipeline (not Promtail),
+are planned for Phase 7.
 
-### 2. Event backbone — PLANNED
+### 2. Event backbone — PARTIALLY IMPLEMENTED (Phase 1)
 
-**Apache Kafka** is the backbone. Telemetry summaries, anomaly events, incident
-lifecycle events, agent findings, approval decisions, and remediation/verification
-outcomes all flow as events on well-defined topics. Services are decoupled and
+**Apache Kafka** is the backbone. Phase 1 runs a single-node KRaft broker with
+one topic (`orders.events`) and one producer. Anomaly events, incident lifecycle
+events, agent findings, approval decisions, and remediation/verification
+outcomes are planned for their respective phases. Services are decoupled and
 independently deployable. Rationale:
-[ADR-001](../decisions/adr-001-event-driven-architecture.md).
+[ADR-001](../decisions/adr-001-event-driven-architecture.md),
+[ADR-006](../decisions/adr-006-kafka-local-deployment-and-client.md),
+[ADR-008](../decisions/adr-008-events-vs-telemetry.md).
 
 ### 3. ML anomaly detection — PLANNED
 
@@ -109,7 +123,7 @@ retraining workflow. Training/evaluation is reproducible.
 | Component | Phase |
 | --- | --- |
 | Repo & dev foundation | 0 (done) |
-| Kafka + first instrumented service | 1 |
+| Kafka + first instrumented service | 1 (done) |
 | ML anomaly detection + offline evaluation | 2 |
 | Incident correlation + PostgreSQL | 3 |
 | AI RCA agent + evidence tools | 4 |
@@ -122,15 +136,23 @@ retraining workflow. Training/evaluation is reproducible.
 
 | Path | Purpose |
 | --- | --- |
-| `apps/` | Deployable user-facing apps (`api`; `frontend` later). |
-| `services/` | Event-driven backend microservices (added from Phase 1). |
+| `apps/api/` | The SentinelOps platform API (Phase 0). |
+| `apps/orders-service/` | Demo app under observation (Phase 1). |
+| `services/` | SentinelOps-internal event processors — correlation, ML consumers (Phase 2+). |
 | `ml/` | ML lifecycle code: data, features, training, evaluation, inference (Phase 2+). |
+| `scripts/` | Developer utilities (e.g. `generate_traffic.py`). |
 | `infrastructure/` | `docker/`, `kubernetes/`, `terraform/` (Phase 7-8). |
-| `tests/` | Cross-cutting tests; each app/service also owns focused tests. |
+| `tests/` | Tests, one subpackage per app/service (`tests/orders_service/`). |
 | `docs/` | `architecture/`, `decisions/` (ADRs), `development/`, `phases/`. |
 
-`apps` vs `services` vs `ml` was kept because the three have genuinely different
-shapes: `apps` are externally reachable and few; `services` are internal,
-event-driven, and many; `ml` is offline/batch pipeline code with a different
-dependency set and lifecycle. Empty directories are **not** committed — each
-appears when its first real file does.
+`apps` vs `services` vs `ml` is kept because the three have genuinely different
+shapes: `apps` are externally reachable (the platform API, and demo apps under
+observation); `services` are SentinelOps-internal, event-driven, and many; `ml`
+is offline/batch pipeline code with a different dependency set and lifecycle.
+`orders-service` sits in `apps/` because it is a stand-in for a customer's
+production application, not a SentinelOps component. Empty directories are
+**not** committed — each appears when its first real file does.
+
+Packaging note: all Python currently ships as one distribution
+(`sentinelops-ai`) with multiple import packages. Splitting per-service
+packaging is a Phase 8 concern.

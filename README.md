@@ -1,6 +1,6 @@
 # SentinelOps AI
 
-> **Current status: Phase 0 — Repository & Development Foundation.**
+> **Current status: Phase 1 — Event backbone + first instrumented service.**
 > Only the items under [Current status](#current-status) are implemented.
 > Everything under [Planned architecture](#planned-architecture) and
 > [Technology roadmap](#technology-roadmap) is future work and is labelled as such.
@@ -51,7 +51,9 @@ An LLM API call is *not* the ML component. See
 
 ## Planned architecture
 
-> **None of the components below exist yet.** This is the target design.
+> Target design. As of Phase 1, only the first instrumented service
+> (`orders-service`) and the Kafka backbone exist — everything else below is
+> future work. See [Current status](#current-status).
 
 ```mermaid
 flowchart LR
@@ -109,7 +111,7 @@ Introduced **only in the phase that needs it**, never earlier:
 | Phase | Focus | State |
 | --- | --- | --- |
 | **0** | Repository & development foundation | **done** |
-| 1 | Event backbone + a first instrumented service emitting telemetry | planned |
+| **1** | Event backbone (Kafka) + a first instrumented service emitting telemetry | **done** |
 | 2 | ML anomaly-detection pipeline + offline evaluation (real metrics) | planned |
 | 3 | Incident correlation + persistence | planned |
 | 4 | AI RCA agent with controlled evidence tools | planned |
@@ -123,36 +125,45 @@ ones. See [docs/phases/roadmap.md](docs/phases/roadmap.md).
 
 ## Development
 
-> Phase 0 commands only — every command below actually works today.
-
-Prerequisites: Python 3.12+ (dev machine uses 3.14), Git. Docker optional.
+> Every command below works today. Prerequisites: Python 3.12+ (dev machine
+> uses 3.14), Git, Docker Desktop (for Phase 1's Kafka).
 
 ```bash
-# 1. Create and populate a virtual environment
+# 1. Virtual environment + dependencies
 python -m venv .venv
-source .venv/Scripts/activate      # Windows Git Bash
-# source .venv/bin/activate        # macOS / Linux
+source .venv/Scripts/activate      # Windows Git Bash;  .venv/bin/activate on Unix
 pip install -e ".[dev]"
-
-# 2. Configure environment
 cp .env.example .env
 
-# 3. Run the API (http://localhost:8000, docs at /docs)
-uvicorn sentinelops_api.main:app --reload --app-dir apps/api
+# 2. The Phase 1 event pipeline (Kafka + orders-service + demo consumer)
+docker compose up --build -d
+curl -X POST http://localhost:8001/orders \
+  -H 'content-type: application/json' \
+  -d '{"customer_id":"customer-1","amount":1499.00,"currency":"INR"}'
+docker compose logs orders-consumer | tail -n 3      # event consumed
+curl -s http://localhost:8001/metrics | grep '^orders_'
+
+# 3. Controlled telemetry scenarios
+python scripts/generate_traffic.py --scenario sequence --duration 30
 ```
 
-With `make` (Git Bash on Windows): `make install`, `make run`, `make check`.
-Full instructions, including the PowerShell equivalents, are in
-[docs/development/setup.md](docs/development/setup.md).
+Run the platform API alone: `uvicorn sentinelops_api.main:app --app-dir apps/api`
+(`:8000`). With `make` (Git Bash): `make install`, `make compose-up`,
+`make run-orders`, `make traffic`, `make check`. Full instructions incl.
+PowerShell in [docs/development/setup.md](docs/development/setup.md).
 
 ## Testing
 
 ```bash
-pytest            # or: make test
+pytest                                                    # unit tests — or: make test
+docker compose up -d kafka && \
+  KAFKA_BOOTSTRAP_SERVERS=localhost:29092 pytest -m integration   # or: make test-integration
 ```
 
-Tests live in [tests/](tests/) and currently prove the app assembles, serves
-`/health`, `/`, and the OpenAPI schema.
+Tests live in [tests/](tests/): the platform API smoke tests, plus
+[tests/orders_service/](tests/orders_service/) covering order validation,
+the event schema, publisher behaviour, failure injection, instrumentation, and
+one end-to-end Kafka round-trip (`-m integration`, deselected by default).
 
 ## Environment variables
 
@@ -176,19 +187,38 @@ not read `os.environ` directly. Future subsystems add their settings there.
 
 ## Current status
 
-**Phase 0 — Repository & Development Foundation.** Implemented:
+### Phase 0 — Repository & Development Foundation *(done)*
 
-- Repository structure and foundational documentation (this README, architecture
-  overview, ADRs, development setup, phase roadmap).
-- Python project configuration (`pyproject.toml`): metadata, minimal runtime
-  deps (FastAPI, Uvicorn, pydantic-settings), dev deps (pytest, httpx, Ruff,
-  mypy).
-- Minimal FastAPI app (`apps/api/sentinelops_api`) exposing `GET /health` and
-  `GET /`.
-- Test suite (`tests/`) with health and startup tests.
-- Code quality: Ruff (lint + format) and mypy (strict).
-- `Makefile`, `Dockerfile`, `docker-compose.yml`, `.gitignore`, `.dockerignore`,
-  `.env.example`, GitHub Actions CI.
+Repo structure and docs (README, architecture overview, ADRs, setup, roadmap);
+`pyproject.toml`; the platform API skeleton (`apps/api/sentinelops_api`) with
+`GET /health` and `GET /`; Ruff + mypy (strict) + pytest; `Makefile`,
+`Dockerfile`, `docker-compose.yml`, `.env.example`, GitHub Actions CI.
 
-Not implemented (later phases): Kafka, ML models, incident correlation, the AI
-agent, remediation, MLflow, the observability stack, Kubernetes, AWS, Terraform.
+### Phase 1 — Event backbone + first instrumented service *(done)*
+
+- **Kafka event backbone** — single-node KRaft broker in Docker Compose; topic
+  `orders.events`; a versioned `order.created` event envelope
+  ([docs/architecture/events.md](docs/architecture/events.md),
+  [ADR-006](docs/decisions/adr-006-kafka-local-deployment-and-client.md)).
+- **`orders-service`** (`apps/orders-service`) — a demo app under observation:
+  `POST /orders` creates an order and synchronously publishes its event
+  ([ADR-010](docs/decisions/adr-010-phase1-synchronous-publish.md)); also
+  `GET /orders/{id}`, `/health`, `/ready`, `/metrics`.
+- **OpenTelemetry instrumentation** — HTTP + business spans; Prometheus-scraped
+  metrics (with a deliberate low-cardinality label policy); structured JSON logs
+  carrying `trace_id`/`span_id`
+  ([ADR-007](docs/decisions/adr-007-opentelemetry-instrumentation-standard.md),
+  [ADR-008](docs/decisions/adr-008-events-vs-telemetry.md)).
+- **Trace correlation into events** — `traceparent` injected into Kafka headers;
+  a demo consumer continues the trace.
+- **Controlled failure injection** (dev-only, disabled by default,
+  [ADR-009](docs/decisions/adr-009-controlled-failure-injection.md)) + a
+  **traffic generator** for reproducible telemetry scenarios
+  ([docs/development/telemetry-scenarios.md](docs/development/telemetry-scenarios.md)).
+
+Details: [docs/architecture/phase-1.md](docs/architecture/phase-1.md).
+
+**Not implemented** (later phases): ML models / training / datasets / MLflow,
+incident correlation, the AI RCA agent / LangGraph / LLM calls, remediation and
+human-approval workflow, a deployed observability stack (Prometheus, Grafana,
+Loki, Tempo), Kubernetes, AWS, Terraform, authentication.

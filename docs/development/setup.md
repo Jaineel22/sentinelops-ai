@@ -1,7 +1,7 @@
 # Development Setup
 
-Phase 0. Every command here works today. Windows (PowerShell and Git Bash) and
-Unix instructions are given.
+Every command here works today (through Phase 1). Windows (PowerShell and Git
+Bash) and Unix instructions are given.
 
 ## Prerequisites
 
@@ -9,7 +9,7 @@ Unix instructions are given.
 | --- | --- | --- |
 | Python | 3.12+ (dev machine: 3.14.5) | `requires-python = ">=3.12"` |
 | Git | any recent | — |
-| Docker Desktop | optional | only for `make docker-*` |
+| Docker Desktop | required for Phase 1 | Kafka + services run in Compose |
 | `make` | optional | bundled with Git for Windows; used for shortcuts |
 
 ## 1. Clone
@@ -66,13 +66,62 @@ uvicorn sentinelops_api.main:app --reload --app-dir apps/api
 - Root:   <http://localhost:8000/>
 - OpenAPI docs: <http://localhost:8000/docs>
 
-## 6. Tests
+## 6. Phase 1: the event pipeline (Kafka + orders-service)
+
+Start everything in Docker:
 
 ```bash
-pytest
+docker compose up --build -d          # api:8000, kafka:29092, orders-service:8001, orders-consumer
+docker compose ps
+curl http://localhost:8001/health     # {"status":"ok"}
+curl http://localhost:8001/ready      # {"status":"ready","kafka":"connected"}
 ```
 
-## 7. Lint, format, type-check
+Create an order and watch the consumer pick it up:
+
+```bash
+curl -X POST http://localhost:8001/orders \
+  -H 'content-type: application/json' \
+  -d '{"customer_id":"customer-1","amount":1499.00,"currency":"INR"}'
+
+docker compose logs orders-consumer | tail -n 5     # "order event received"
+curl -s http://localhost:8001/metrics | grep '^orders_'
+```
+
+Run `orders-service` on the host instead (needs only Kafka in Compose):
+
+```bash
+docker compose up -d kafka
+make run-orders            # uses KAFKA_BOOTSTRAP_SERVERS=localhost:29092, port 8001
+```
+
+Generate controlled telemetry scenarios:
+
+```bash
+python scripts/generate_traffic.py --scenario normal   --rate 5 --duration 60
+python scripts/generate_traffic.py --scenario latency  --rate 5 --duration 45
+python scripts/generate_traffic.py --scenario sequence --duration 30   # normal→latency→errors→surge→recovery
+```
+
+See [telemetry-scenarios.md](telemetry-scenarios.md) for what each scenario
+should do to metrics, traces, and logs.
+
+Tear down: `docker compose down` (add `-v` to drop volumes).
+
+## 7. Tests
+
+```bash
+pytest                     # unit tests (no broker needed) — or: make test
+```
+
+Integration test (needs a broker):
+
+```bash
+docker compose up -d kafka
+KAFKA_BOOTSTRAP_SERVERS=localhost:29092 pytest -m integration    # or: make test-integration
+```
+
+## 8. Lint, format, type-check
 
 ```bash
 ruff check .            # lint
@@ -81,33 +130,31 @@ ruff format --check .   # verify formatting (used in CI)
 mypy                    # strict type-check (config in pyproject.toml)
 ```
 
-## 8. Make shortcuts (Git Bash)
+## 9. Make shortcuts (Git Bash)
+
+Run `make help` for the full list. Common ones:
 
 | Command | Does |
 | --- | --- |
-| `make install` | create-less install into `.venv` (run `make venv` first if needed) |
-| `make run` | run the API with autoreload |
-| `make test` | run pytest |
-| `make lint` | `ruff check` |
-| `make format` | `ruff format` + `ruff check --fix` |
-| `make typecheck` | `mypy` |
+| `make install` | install deps into `.venv` (run `make venv` first if needed) |
+| `make run` / `make run-orders` | run the platform API (:8000) / orders-service (:8001) |
+| `make test` / `make test-integration` | unit tests / integration tests (needs Kafka) |
+| `make lint` / `make format` / `make typecheck` | Ruff / Ruff / mypy |
 | `make check` | lint + typecheck + test (the full gate) |
-| `make docker-build` / `make docker-run` | build / run the image |
+| `make compose-up` / `make compose-down` / `make compose-logs` | Phase 1 environment |
+| `make traffic SCENARIO=latency` | run the traffic generator |
 
-On PowerShell, use the explicit commands above instead of `make`.
+On PowerShell, use the explicit commands instead of `make`.
 
-## 9. Docker
+## 10. Docker
 
 ```bash
-docker build -t sentinelops-ai:phase0 .
-docker run --rm -p 8000:8000 sentinelops-ai:phase0
-# or
-docker compose up --build
+docker build -t sentinelops-ai:api .                                   # platform API
+docker build -f apps/orders-service/Dockerfile -t sentinelops-ai:orders-service .
+docker compose up --build                                              # full Phase 1 env
 ```
 
-Then check <http://localhost:8000/health>.
-
-## 10. Git workflow
+## 11. Git workflow
 
 - `main` is protected; work on branches: `git switch -c phase-<n>/<short-topic>`.
 - Keep commits small and scoped; run `make check` before pushing.

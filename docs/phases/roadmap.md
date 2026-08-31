@@ -13,11 +13,19 @@ FastAPI app with `/health`, pytest, Ruff, mypy, Dockerfile, Compose, CI,
 **Exit criteria:** app starts, `/health` returns `{"status":"ok"}`, tests pass,
 lint/type-check/format pass, Docker image builds and runs, no secrets committed.
 
-## Phase 1 — Event backbone + first instrumented service — planned
+## Phase 1 — Event backbone + first instrumented service — **done**
 
-Kafka via Docker Compose; one service that emits production-like telemetry
-events to a topic; a consumer that persists/prints them. Defines topic and
-event-schema conventions.
+Single-node KRaft Kafka via Docker Compose; `orders-service` (demo app) emits
+versioned `order.created` events to `orders.events`, instrumented with
+OpenTelemetry (traces + Prometheus metrics + structured JSON logs); a demo
+consumer proves the path and continues the trace; development-only failure
+injection + a traffic generator produce controlled telemetry scenarios.
+Details: [../architecture/phase-1.md](../architecture/phase-1.md).
+
+**Exit criteria:** `docker compose up` starts Kafka + services; `POST /orders`
+publishes a well-formed event to `orders.events`; unit + integration tests pass;
+latency/error injection visibly changes metrics/traces/logs; no Phase 2+
+functionality present.
 
 ## Phase 2 — ML anomaly detection + offline evaluation — planned
 
