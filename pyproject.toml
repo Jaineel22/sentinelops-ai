@@ -34,6 +34,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# ML anomaly-detection subsystem (Phase 2). Kept out of the API/service runtime
+# path — only the ml/ package and its tooling need these.
+ml = [
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "joblib>=1.3",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -49,12 +59,13 @@ Repository = "https://github.com/Jaineel22/sentinelops-ai"
 packages = [
     "apps/api/sentinelops_api",
     "apps/orders-service/orders_service",
+    "ml",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --import-mode=importlib -m 'not integration'"
-pythonpath = ["apps/api", "apps/orders-service"]
+pythonpath = ["apps/api", "apps/orders-service", "."]
 asyncio_mode = "auto"
 markers = [
     "integration: tests that need a running Kafka broker (deselected by default)",
@@ -67,7 +78,7 @@ filterwarnings = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["apps/api", "apps/orders-service", "tests", "scripts"]
+src = ["apps/api", "apps/orders-service", "ml", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -75,10 +86,19 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["apps/api", "apps/orders-service", "tests", "scripts"]
+files = ["apps/api", "apps/orders-service", "ml", "tests", "scripts"]
 mypy_path = ["apps/api", "apps/orders-service"]
 
 [[tool.mypy.overrides]]
 # These ship incomplete or no type information.
-module = ["aiokafka.*", "opentelemetry.exporter.prometheus.*"]
+module = [
+    "aiokafka.*",
+    "opentelemetry.exporter.prometheus.*",
+    "prometheus_client.*",
+    "pandas.*",
+    "sklearn.*",
+    "scipy.*",
+    "matplotlib.*",
+    "joblib.*",
+]
 ignore_missing_imports = true

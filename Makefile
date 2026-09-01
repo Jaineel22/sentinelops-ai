@@ -15,7 +15,9 @@ PY := $(BIN)/python
 .PHONY: help venv install test test-integration lint format typecheck check \
         run run-orders traffic \
         compose-up compose-down compose-logs \
-        docker-build docker-build-orders
+        docker-build docker-build-orders \
+        ml-test data-prepare nab-download ml-experiments ml-experiment ml-infer-demo \
+        ml-docker-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -23,9 +25,9 @@ help: ## Show this help
 venv: ## Create the virtual environment
 	python -m venv $(VENV)
 
-install: ## Install runtime + dev dependencies (editable)
+install: ## Install runtime + dev + ml dependencies (editable)
 	$(PY) -m pip install --upgrade pip
-	$(PY) -m pip install -e ".[dev]"
+	$(PY) -m pip install -e ".[dev,ml]"
 
 test: ## Run unit tests (no broker needed)
 	$(PY) -m pytest
@@ -70,3 +72,29 @@ docker-build: ## Build the platform API image
 
 docker-build-orders: ## Build the orders-service image
 	docker build -f apps/orders-service/Dockerfile -t sentinelops-ai:orders-service .
+
+# --- Phase 2: ML anomaly detection ---------------------------------------
+ml-test: ## Run only the ML test suite
+	$(PY) -m pytest tests/ml
+
+data-generate: ## (needs compose + host orders-service) collect a Track A run: RUN_ID=run_a PLAN=main
+	$(PY) -m ml.collection.collector --run-id $(or $(RUN_ID),run_a) --plan $(or $(PLAN),main)
+
+data-prepare: ## Turn raw metric snapshots into committed window datasets
+	$(PY) -m ml.data.prepare run_a run_b
+
+nab-download: ## Download the pinned NAB benchmark series (git-ignored)
+	$(PY) -m ml.data.nab download
+
+ml-experiments: ## Run all experiments on committed data -> artifacts/reports/
+	$(PY) -m ml.experiments run all
+
+ml-experiment: ## Run one experiment: NAME=exp2_isolation_forest_sentinelops
+	$(PY) -m ml.experiments run $(NAME)
+
+ml-infer-demo: ## Score a processed run through the saved Isolation Forest
+	$(PY) -m ml.inference artifacts/models/exp2_isolation_forest_sentinelops__isolation_forest.joblib \
+		ml/data/processed/sentinelops/run_a/windows.csv
+
+ml-docker-build: ## Build the ML pipeline image
+	docker build -f ml/Dockerfile -t sentinelops-ai:ml .

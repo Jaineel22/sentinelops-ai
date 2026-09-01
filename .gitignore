@@ -29,7 +29,7 @@ htmlcov/
 *.log
 logs/
 
-# --- ML artifacts (introduced in later phases) ---
+# --- ML artifacts (Phase 2+) ---
 mlruns/
 mlartifacts/
 *.joblib
@@ -37,6 +37,12 @@ mlartifacts/
 data/raw/
 data/interim/
 data/processed/
+# Raw metric scrapes and downloaded benchmark data are regenerable / not ours
+# to redistribute. Processed window datasets under ml/data/processed/ and
+# reports under artifacts/reports/ ARE committed.
+ml/data/raw/
+artifacts/models/
+artifacts/data/
 
 # --- IDE / editor ---
 .vscode/
