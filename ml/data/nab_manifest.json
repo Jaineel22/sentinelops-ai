@@ -1,0 +1,12 @@
+{
+  "ref": "master",
+  "base": "https://raw.githubusercontent.com/numenta/NAB/master",
+  "files": {
+    "realKnownCause/machine_temperature_system_failure.csv": "92bf5b87fc7f9bba8ca0b7ec63ccaac8cb4a1371a258e8c29a10ae9c018d82a4",
+    "realKnownCause/ambient_temperature_system_failure.csv": "230b68ccca20f59d562afd5d24ad52939c9b784386bed0054018358bf9120581",
+    "realKnownCause/nyc_taxi.csv": "d8fa6f7f0734bf5c8be12c52a94e20a82664c397d9dec4449156bd453d32856d",
+    "realAWSCloudwatch/ec2_cpu_utilization_5f5533.csv": "01613e6f632d067f11a5dfd40a188b0789752b388d9bc77a398bd06333878a76",
+    "realAWSCloudwatch/ec2_cpu_utilization_fe7f93.csv": "f3433f8171f4dcea86c0c7af9996d0f166f812fa0f4567f1d5cd85d2d2cd69b4",
+    "labels/combined_windows.json": "1e1fbc4601321aad8d0f8b3784c8134299379f68f6c1f7777565f8ffd57ab6b1"
+  }
+}

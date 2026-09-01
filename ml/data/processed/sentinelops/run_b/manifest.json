@@ -1,0 +1,168 @@
+{
+  "run_id": "run_b",
+  "plan": "holdout",
+  "created_at": "2026-08-31T16:52:36.221361+00:00",
+  "seed": 7,
+  "base_url": "http://localhost:8001",
+  "step_seconds": 10.0,
+  "segment_seconds": 70.0,
+  "settle_seconds": 4.0,
+  "baseline_rate_rps": 3.0,
+  "scenario_order": [
+    "normal",
+    "publish_failure",
+    "normal",
+    "surge",
+    "normal",
+    "recovery",
+    "normal",
+    "publish_failure",
+    "normal",
+    "surge",
+    "normal",
+    "recovery",
+    "normal",
+    "publish_failure",
+    "normal",
+    "surge",
+    "normal",
+    "recovery"
+  ],
+  "segments": [
+    {
+      "index": 0,
+      "scenario": "normal",
+      "label": "normal",
+      "start_ts": 1788193812.4470875,
+      "end_ts": 1788193887.0308723
+    },
+    {
+      "index": 1,
+      "scenario": "publish_failure",
+      "label": "publish_failure",
+      "start_ts": 1788193887.0379927,
+      "end_ts": 1788193961.720923
+    },
+    {
+      "index": 2,
+      "scenario": "normal",
+      "label": "normal",
+      "start_ts": 1788193961.7293468,
+      "end_ts": 1788194036.6611385
+    },
+    {
+      "index": 3,
+      "scenario": "surge",
+      "label": "traffic_surge",
+      "start_ts": 1788194036.6702669,
+      "end_ts": 1788194111.4451697
+    },
+    {
+      "index": 4,
+      "scenario": "normal",
+      "label": "normal",
+      "start_ts": 1788194111.4517915,
+      "end_ts": 1788194186.021812
+    },
+    {
+      "index": 5,
+      "scenario": "recovery",
+      "label": "recovery",
+      "start_ts": 1788194186.0289202,
+      "end_ts": 1788194260.5948021
+    },
+    {
+      "index": 6,
+      "scenario": "normal",
+      "label": "normal",
+      "start_ts": 1788194260.601914,
+      "end_ts": 1788194335.5471864
+    },
+    {
+      "index": 7,
+      "scenario": "publish_failure",
+      "label": "publish_failure",
+      "start_ts": 1788194335.5541198,
+      "end_ts": 1788194410.489555
+    },
+    {
+      "index": 8,
+      "scenario": "normal",
+      "label": "normal",
+      "start_ts": 1788194410.498777,
+      "end_ts": 1788194485.0308597
+    },
+    {
+      "index": 9,
+      "scenario": "surge",
+      "label": "traffic_surge",
+      "start_ts": 1788194485.0369132,
+      "end_ts": 1788194559.6686766
+    },
+    {
+      "index": 10,
+      "scenario": "normal",
+      "label": "normal",
+      "start_ts": 1788194559.6739783,
+      "end_ts": 1788194634.4605603
+    },
+    {
+      "index": 11,
+      "scenario": "recovery",
+      "label": "recovery",
+      "start_ts": 1788194634.4664397,
+      "end_ts": 1788194709.2705798
+    },
+    {
+      "index": 12,
+      "scenario": "normal",
+      "label": "normal",
+      "start_ts": 1788194709.2783794,
+      "end_ts": 1788194783.7085698
+    },
+    {
+      "index": 13,
+      "scenario": "publish_failure",
+      "label": "publish_failure",
+      "start_ts": 1788194783.7145677,
+      "end_ts": 1788194858.1985843
+    },
+    {
+      "index": 14,
+      "scenario": "normal",
+      "label": "normal",
+      "start_ts": 1788194858.2043688,
+      "end_ts": 1788194932.6493251
+    },
+    {
+      "index": 15,
+      "scenario": "surge",
+      "label": "traffic_surge",
+      "start_ts": 1788194932.6555345,
+      "end_ts": 1788195007.2906651
+    },
+    {
+      "index": 16,
+      "scenario": "normal",
+      "label": "normal",
+      "start_ts": 1788195007.2952535,
+      "end_ts": 1788195081.7225385
+    },
+    {
+      "index": 17,
+      "scenario": "recovery",
+      "label": "recovery",
+      "start_ts": 1788195081.7282012,
+      "end_ts": 1788195156.2103627
+    }
+  ],
+  "n_snapshots": 126,
+  "n_windows": 108,
+  "label_counts": {
+    "normal": 54,
+    "publish_failure": 18,
+    "traffic_surge": 18,
+    "recovery": 18
+  },
+  "anomaly_fraction": 0.3333
+}
