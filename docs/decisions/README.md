@@ -21,6 +21,11 @@ supersedes the old one and update the status line.
 | [011](adr-011-ml-dataset-via-metrics-scraping.md) | Build the Track A ML dataset by scraping `/metrics` | Accepted |
 | [012](adr-012-isolation-forest-primary-detector.md) | Isolation Forest is the primary anomaly detector | Accepted |
 | [013](adr-013-nab-benchmark-track.md) | NAB as the independent benchmark track | Accepted |
+| [014](adr-014-postgresql-for-incident-state.md) | PostgreSQL for incident state | Accepted |
+| [015](adr-015-deterministic-anomaly-correlation.md) | Deterministic anomaly-to-incident correlation | Accepted |
+| [016](adr-016-idempotent-kafka-consumer.md) | Idempotent Kafka consumer with at-least-once semantics | Accepted |
+| [017](adr-017-incident-state-machine.md) | Incident lifecycle state machine | Accepted |
+| [018](adr-018-kafka-partitioning-strategy.md) | Kafka partitioning by correlation key | Accepted |
 
 ## Template
 
