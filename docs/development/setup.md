@@ -1,6 +1,6 @@
 # Development Setup
 
-Every command here works today (through Phase 1). Windows (PowerShell and Git
+Every command here works today (through Phase 2). Windows (PowerShell and Git
 Bash) and Unix instructions are given.
 
 ## Prerequisites
@@ -40,11 +40,12 @@ python -m venv .venv
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,ml]"
 ```
 
 `-e` (editable) means source changes take effect without reinstalling. `[dev]`
-adds pytest, httpx, Ruff, and mypy.
+adds pytest, httpx, Ruff, and mypy; `[ml]` adds pandas, NumPy, scikit-learn,
+SciPy, matplotlib, and joblib (Phase 2). Drop `,ml` if you only need Phase 0/1.
 
 ## 4. Environment configuration
 
@@ -121,7 +122,36 @@ docker compose up -d kafka
 KAFKA_BOOTSTRAP_SERVERS=localhost:29092 pytest -m integration    # or: make test-integration
 ```
 
-## 8. Lint, format, type-check
+## 8. Phase 2: ML anomaly detection
+
+The `ml/` subsystem is offline. The committed datasets under
+`ml/data/processed/sentinelops/` mean you can run everything without regenerating
+data:
+
+```bash
+make ml-test                       # ML unit tests only
+make nab-download                  # Track B benchmark data (network; git-ignored)
+make ml-experiments                # all 6 experiments -> artifacts/reports/ + summary.md
+make ml-experiment NAME=exp2_isolation_forest_sentinelops
+
+# use a trained model through the Phase 3 boundary
+python -m ml.inference \
+  artifacts/models/exp2_isolation_forest_sentinelops__isolation_forest.joblib \
+  ml/data/processed/sentinelops/run_a/windows.csv
+```
+
+Regenerate Track A telemetry (needs Docker + a host `orders-service`, ~20 min per
+run):
+
+```bash
+docker compose up -d kafka
+make run-orders &                                   # host orders-service on :8001
+python -m ml.collection.collector --run-id run_a --plan main
+python -m ml.collection.collector --run-id run_b --plan holdout
+make data-prepare                                   # -> ml/data/processed/sentinelops/
+```
+
+## 9. Lint, format, type-check
 
 ```bash
 ruff check .            # lint
@@ -130,7 +160,7 @@ ruff format --check .   # verify formatting (used in CI)
 mypy                    # strict type-check (config in pyproject.toml)
 ```
 
-## 9. Make shortcuts (Git Bash)
+## 10. Make shortcuts (Git Bash)
 
 Run `make help` for the full list. Common ones:
 
@@ -138,23 +168,29 @@ Run `make help` for the full list. Common ones:
 | --- | --- |
 | `make install` | install deps into `.venv` (run `make venv` first if needed) |
 | `make run` / `make run-orders` | run the platform API (:8000) / orders-service (:8001) |
-| `make test` / `make test-integration` | unit tests / integration tests (needs Kafka) |
+| `make test` / `make test-integration` / `make ml-test` | unit tests / integration tests / ML tests |
 | `make lint` / `make format` / `make typecheck` | Ruff / Ruff / mypy |
 | `make check` | lint + typecheck + test (the full gate) |
 | `make compose-up` / `make compose-down` / `make compose-logs` | Phase 1 environment |
 | `make traffic SCENARIO=latency` | run the traffic generator |
+| `make ml-experiments` / `make ml-experiment NAME=...` | run Phase 2 experiments |
+| `make nab-download` / `make data-prepare` | Track B data / rebuild processed datasets |
 
 On PowerShell, use the explicit commands instead of `make`.
 
-## 10. Docker
+## 11. Docker
 
 ```bash
 docker build -t sentinelops-ai:api .                                   # platform API
 docker build -f apps/orders-service/Dockerfile -t sentinelops-ai:orders-service .
+docker build -f ml/Dockerfile -t sentinelops-ai:ml .                   # ML experiment runner
 docker compose up --build                                              # full Phase 1 env
+
+# run the ML experiments in the container, writing to the host artifacts/ dir
+docker run --rm -v "$PWD/artifacts:/app/artifacts" sentinelops-ai:ml run all
 ```
 
-## 11. Git workflow
+## 12. Git workflow
 
 - `main` is protected; work on branches: `git switch -c phase-<n>/<short-topic>`.
 - Keep commits small and scoped; run `make check` before pushing.

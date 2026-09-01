@@ -18,28 +18,49 @@ jobs:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
+          python -m pip install -e ".[dev,ml]"
       - name: Lint (Ruff)
         run: ruff check .
-
       - name: Format check (Ruff)
         run: ruff format --check .
-
       - name: Type-check (mypy)
         run: mypy
-
       - name: Unit tests (pytest)
         run: pytest
+
+  ml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,ml]"
+      - name: Download NAB benchmark data (best effort)
+        run: python -m ml.data.nab download || echo "NAB download failed — Track B tests will skip"
+      - name: ML tests
+        run: pytest tests/ml -q
+      - name: Track A experiments (committed data)
+        run: |
+          python -m ml.experiments run exp3_comparison_sentinelops
+          python -m ml.experiments run exp4_heldout_fault_sentinelops
+          test -f artifacts/reports/exp3_comparison_sentinelops/metrics.json
+      - name: Track B experiments (if NAB data present)
+        run: |
+          python -m ml.data.nab download >/dev/null 2>&1 \
+            && python -m ml.experiments run exp5_nab_realknowncause \
+            && python -m ml.experiments run exp6_nab_realawscloudwatch \
+            || echo "skipped Track B (no NAB data)"
 
   integration:
     runs-on: ubuntu-latest
@@ -51,7 +72,7 @@ jobs:
           cache: pip
       - run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,ml]"
       - name: Start Kafka
         run: |
           docker compose up -d kafka
@@ -73,3 +94,5 @@ jobs:
         run: docker build -t sentinelops-ai:ci-api .
       - name: Build orders-service image
         run: docker build -f apps/orders-service/Dockerfile -t sentinelops-ai:ci-orders .
+      - name: Build ML image
+        run: docker build -f ml/Dockerfile -t sentinelops-ai:ci-ml .

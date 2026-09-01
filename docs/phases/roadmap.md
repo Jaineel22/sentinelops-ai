@@ -27,12 +27,24 @@ publishes a well-formed event to `orders.events`; unit + integration tests pass;
 latency/error injection visibly changes metrics/traces/logs; no Phase 2+
 functionality present.
 
-## Phase 2 — ML anomaly detection + offline evaluation — planned
+## Phase 2 — ML anomaly detection + offline evaluation — **done**
 
-Feature pipeline for live-matching telemetry; a trained detector; a **separate**
-benchmark track (HDFS/BGL/NAB). Real metrics: precision, recall, F1, PR-AUC,
-false-positive rate, detection latency. See
-[ADR-004](../decisions/adr-004-datasets-vs-live-telemetry.md).
+`ml/` subsystem. Track A: a leak-safe dataset built by scraping `orders-service`
+`/metrics` under scripted scenarios; a 23-feature engineering layer shared by
+training and inference; chronological + held-out-fault splits; a robust z-score
+baseline and an Isolation Forest (primary), with a supervised RF comparator;
+window-wise + event-wise evaluation (precision, recall, F1, PR-AUC, FPR,
+detection delay). Track B: the same methodology on the public NAB benchmark
+(downloaded, not committed). `ml.inference.DetectorService` is the Phase 3
+boundary. Details: [../architecture/phase-2.md](../architecture/phase-2.md);
+[ADR-011](../decisions/adr-011-ml-dataset-via-metrics-scraping.md),
+[ADR-012](../decisions/adr-012-isolation-forest-primary-detector.md),
+[ADR-013](../decisions/adr-013-nab-benchmark-track.md).
+
+**Exit criteria:** `make ml-experiments` reproduces all six experiments and
+`artifacts/reports/summary.md` from committed data; ML + Phase 0/1 tests pass;
+no test-set leakage; the held-out-fault and NAB experiments run; no Phase 3+
+functionality present.
 
 ## Phase 3 — Incident correlation + persistence — planned
 

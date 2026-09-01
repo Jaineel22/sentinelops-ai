@@ -1,6 +1,6 @@
 # SentinelOps AI
 
-> **Current status: Phase 1 — Event backbone + first instrumented service.**
+> **Current status: Phase 2 — ML anomaly detection + offline evaluation.**
 > Only the items under [Current status](#current-status) are implemented.
 > Everything under [Planned architecture](#planned-architecture) and
 > [Technology roadmap](#technology-roadmap) is future work and is labelled as such.
@@ -112,7 +112,7 @@ Introduced **only in the phase that needs it**, never earlier:
 | --- | --- | --- |
 | **0** | Repository & development foundation | **done** |
 | **1** | Event backbone (Kafka) + a first instrumented service emitting telemetry | **done** |
-| 2 | ML anomaly-detection pipeline + offline evaluation (real metrics) | planned |
+| **2** | ML anomaly-detection pipeline + offline evaluation (real metrics) | **done** |
 | 3 | Incident correlation + persistence | planned |
 | 4 | AI RCA agent with controlled evidence tools | planned |
 | 5 | Human-approved, allow-listed remediation + recovery verification + audit | planned |
@@ -129,10 +129,10 @@ ones. See [docs/phases/roadmap.md](docs/phases/roadmap.md).
 > uses 3.14), Git, Docker Desktop (for Phase 1's Kafka).
 
 ```bash
-# 1. Virtual environment + dependencies
+# 1. Virtual environment + dependencies (dev tools + ML libs)
 python -m venv .venv
 source .venv/Scripts/activate      # Windows Git Bash;  .venv/bin/activate on Unix
-pip install -e ".[dev]"
+pip install -e ".[dev,ml]"
 cp .env.example .env
 
 # 2. The Phase 1 event pipeline (Kafka + orders-service + demo consumer)
@@ -140,30 +140,32 @@ docker compose up --build -d
 curl -X POST http://localhost:8001/orders \
   -H 'content-type: application/json' \
   -d '{"customer_id":"customer-1","amount":1499.00,"currency":"INR"}'
-docker compose logs orders-consumer | tail -n 3      # event consumed
-curl -s http://localhost:8001/metrics | grep '^orders_'
 
-# 3. Controlled telemetry scenarios
-python scripts/generate_traffic.py --scenario sequence --duration 30
+# 3. Phase 2 ML: reproduce every experiment on the committed datasets
+make ml-experiments                # -> artifacts/reports/ + summary.md
+python -m ml.inference \
+  artifacts/models/exp2_isolation_forest_sentinelops__isolation_forest.joblib \
+  ml/data/processed/sentinelops/run_a/windows.csv
 ```
 
-Run the platform API alone: `uvicorn sentinelops_api.main:app --app-dir apps/api`
-(`:8000`). With `make` (Git Bash): `make install`, `make compose-up`,
-`make run-orders`, `make traffic`, `make check`. Full instructions incl.
-PowerShell in [docs/development/setup.md](docs/development/setup.md).
+With `make` (Git Bash): `make install`, `make compose-up`, `make run-orders`,
+`make ml-experiments`, `make check`. Full instructions incl. PowerShell in
+[docs/development/setup.md](docs/development/setup.md).
 
 ## Testing
 
 ```bash
-pytest                                                    # unit tests — or: make test
+pytest                                                    # all unit tests — or: make test
+make ml-test                                               # just the ML suite
 docker compose up -d kafka && \
   KAFKA_BOOTSTRAP_SERVERS=localhost:29092 pytest -m integration   # or: make test-integration
 ```
 
-Tests live in [tests/](tests/): the platform API smoke tests, plus
-[tests/orders_service/](tests/orders_service/) covering order validation,
-the event schema, publisher behaviour, failure injection, instrumentation, and
-one end-to-end Kafka round-trip (`-m integration`, deselected by default).
+Tests live in [tests/](tests/): the platform API smoke tests,
+[tests/orders_service/](tests/orders_service/) (order validation, event schema,
+publisher, failure injection, instrumentation, one Kafka round-trip), and
+[tests/ml/](tests/ml/) (parsing, validation, feature causality & no-leakage,
+splits, detectors, save/load, inference, metrics, an experiment repro check).
 
 ## Environment variables
 
@@ -218,7 +220,38 @@ Repo structure and docs (README, architecture overview, ADRs, setup, roadmap);
 
 Details: [docs/architecture/phase-1.md](docs/architecture/phase-1.md).
 
-**Not implemented** (later phases): ML models / training / datasets / MLflow,
-incident correlation, the AI RCA agent / LangGraph / LLM calls, remediation and
-human-approval workflow, a deployed observability stack (Prometheus, Grafana,
-Loki, Tempo), Kubernetes, AWS, Terraform, authentication.
+### Phase 2 — ML anomaly detection + offline evaluation *(done, offline)*
+
+The `ml/` subsystem — an offline pipeline, not yet wired into the live path.
+
+- **Track A dataset** — built by scraping `orders-service` `/metrics` every 10 s
+  under a seeded sequence of fault scenarios; counter deltas → per-window rate
+  signals; ground-truth labels kept separate; boundary/reset windows dropped
+  ([ADR-011](docs/decisions/adr-011-ml-dataset-via-metrics-scraping.md)). Two
+  canonical runs committed as small CSVs.
+- **Feature engineering** — 23 causal features (rates, latency percentiles,
+  rolling mean/std, deltas, growth rate); *one* implementation shared by
+  training and streaming inference, with a test that they agree row-for-row and
+  a test that no injected-fault ground truth leaks in.
+- **Leak-safe splits** — chronological train/val/test, plus a held-out-fault
+  split (train on latency+error faults, test on publish-failure+surge).
+- **Detectors** — robust median/MAD z-score **baseline**; **Isolation Forest**
+  primary ([ADR-012](docs/decisions/adr-012-isolation-forest-primary-detector.md));
+  supervised Random Forest comparator. Shared `fit / score / predict / save /
+  load` interface.
+- **Evaluation** — window-wise precision/recall/F1/FPR/FNR/PR-AUC/confusion plus
+  event-wise detection delay and false-alarms-per-hour.
+- **Experiments 1-6** — baseline, IF, three-way comparison, held-out fault, and
+  the same methodology on the independent **NAB** benchmark (downloaded, not
+  committed — [ADR-013](docs/decisions/adr-013-nab-benchmark-track.md)). Results
+  in `artifacts/reports/`.
+- **Phase 3 boundary** — `ml.inference.DetectorService.score_window(signals) →
+  AnomalyResult`.
+
+Details + all measured numbers: [docs/architecture/phase-2.md](docs/architecture/phase-2.md).
+
+**Not implemented** (later phases): a running service that scores live telemetry
+and emits anomaly events onto Kafka; incident correlation; the AI RCA agent /
+LangGraph / LLM calls; remediation and human-approval workflow; MLflow / model
+registry; XGBoost / deep models; a deployed observability stack; Kubernetes;
+AWS; Terraform; authentication.
