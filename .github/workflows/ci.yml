@@ -25,7 +25,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,ml,incident,detector]"
+          python -m pip install -e ".[dev,ml,incident,detector,rca]"
       - name: Lint (Ruff)
         run: ruff check .
       - name: Format check (Ruff)
@@ -45,7 +45,7 @@ jobs:
           cache: pip
       - run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,ml,incident,detector]"
+          python -m pip install -e ".[dev,ml,incident,detector,rca]"
       - name: Download NAB benchmark data (best effort)
         run: python -m ml.data.nab download || echo "NAB download failed — Track B tests will skip"
       - name: ML tests
@@ -88,7 +88,7 @@ jobs:
           cache: pip
       - run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,ml,incident,detector]"
+          python -m pip install -e ".[dev,ml,incident,detector,rca]"
       - name: Start Kafka
         run: |
           docker compose up -d kafka
@@ -99,6 +99,9 @@ jobs:
           docker inspect -f '{{.State.Health.Status}}' sentinelops-ai-kafka-1
       - name: Apply incident-correlator migrations
         working-directory: services/incident-correlator
+        run: alembic upgrade head
+      - name: Apply rca-agent migrations
+        working-directory: services/rca-agent
         run: alembic upgrade head
       - name: Integration tests
         run: pytest -m integration
@@ -119,3 +122,5 @@ jobs:
         run: docker build -f services/incident-correlator/Dockerfile -t sentinelops-ai:ci-incident .
       - name: Build anomaly-detector image
         run: docker build -f services/anomaly-detector/Dockerfile -t sentinelops-ai:ci-detector .
+      - name: Build rca-agent image
+        run: docker build -f services/rca-agent/Dockerfile -t sentinelops-ai:ci-rca .

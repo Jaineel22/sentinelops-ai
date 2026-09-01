@@ -1,17 +1,24 @@
-# Local environment (Phases 1 + 3):
+# Local environment (Phases 1 + 3 + 4):
 #   - api                 the SentinelOps platform API (Phase 0)
 #   - kafka               single-node Kafka in KRaft mode (no ZooKeeper) — ADR-006
 #   - orders-service      demo app: HTTP -> order.created events -> Kafka + OTel
 #   - orders-consumer     demo sink proving producer -> Kafka -> consumer works
-#   - postgres            incident state store (Phase 3) — ADR-014
-#   - incident-migrate    one-shot: `alembic upgrade head`, then exits
+#   - postgres            incident + investigation state store (Phase 3/4) — ADR-014/019
+#   - incident-migrate    one-shot: `alembic upgrade head` (incident lineage), then exits
+#   - rca-migrate         one-shot: `alembic upgrade head` (rca lineage, alembic_version_rca)
 #   - anomaly-detector    scores orders-service telemetry -> anomaly.detected (Phase 3)
 #   - incident-correlator anomaly.detected -> incidents (Postgres) + Incident API (Phase 3)
+#   - rca-agent           incident.opened -> bounded RCA investigation + Investigation API (Phase 4)
 #
 # Start everything:            docker compose up --build
 # Just the event pipeline:     docker compose up --build kafka orders-service orders-consumer
 # Just Phase 3:                docker compose up --build kafka postgres orders-service \
 #                                  incident-migrate anomaly-detector incident-correlator
+# Phase 4 too:                 docker compose up --build   (adds rca-migrate + rca-agent)
+#
+# rca-agent defaults to RCA_MODE=mock — the whole chain runs with NO LLM API key.
+# For a live run: set RCA_MODE=live, LLM_PROVIDER=anthropic and LLM_API_KEY in your
+# shell (compose reads it from the environment; it is never committed here).
 #
 # Dev-only Postgres credentials live in this file; never reuse them anywhere real.
 # No Redis / Prometheus / Grafana / Loki / Tempo yet — later phases.
@@ -145,6 +152,54 @@ services:
         condition: service_healthy
       incident-migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  rca-migrate:
+    build:
+      context: .
+      dockerfile: services/rca-agent/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    healthcheck:
+      disable: true # one-shot job, exits 0 when the rca schema is current
+    environment:
+      DB_URL: postgresql+asyncpg://sentinelops:sentinelops@postgres:5432/sentinelops
+    depends_on:
+      postgres:
+        condition: service_healthy
+      incident-migrate:
+        condition: service_completed_successfully # serialize the two lineages
+    restart: "no"
+
+  rca-agent:
+    build:
+      context: .
+      dockerfile: services/rca-agent/Dockerfile
+    ports:
+      - "8004:8000"
+    environment:
+      APP_ENV: development
+      DB_URL: postgresql+asyncpg://sentinelops:sentinelops@postgres:5432/sentinelops
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_INCIDENT_TOPIC: incident.events
+      KAFKA_INCIDENT_DLQ_TOPIC: incident.events.dlq
+      KAFKA_CONSUMER_GROUP: rca-agent
+      # mock = deterministic, no LLM API key needed. Override to "live" + set
+      # LLM_PROVIDER / LLM_API_KEY for a real provider (ADR-022).
+      RCA_MODE: ${RCA_MODE:-mock}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      RCA_INCIDENT_API_BASE_URL: http://incident-correlator:8000
+      OTEL_SERVICE_NAME: rca-agent
+      OTEL_TRACES_CONSOLE_EXPORT: "false"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rca-migrate:
+        condition: service_completed_successfully
+      incident-correlator:
+        condition: service_started # needs the Incident API reachable during investigations
     restart: unless-stopped
 
   anomaly-detector:

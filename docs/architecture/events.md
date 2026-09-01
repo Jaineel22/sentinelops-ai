@@ -78,11 +78,14 @@ re-exports it. Payload contracts for cross-service events live in
 
 - **Payload:** `IncidentLifecycleV1` (`incident.opened` / `incident.updated` /
   `incident.resolved`, v1) — a **best-effort** notification that an incident
-  changed. The Incident API / PostgreSQL is authoritative; this stream is a
+  changed. The Incident API / PostgreSQL is authoritative; this stream is the
   wake-up for Phase 4.
 - **Key:** `correlation_key` (`service:environment`).
 - Published **after** the database transaction commits; a lost lifecycle event
   never corrupts state.
+- **Consumed by** `rca-agent` (Phase 4): `incident.opened` triggers one bounded
+  investigation per incident; `incident.updated` / `incident.resolved` are
+  ignored. Malformed events → `incident.events.dlq`.
 
 ## Producers
 
@@ -102,6 +105,7 @@ publishing is best-effort, after the DB commit (ADR-016).
 | --- | --- | --- |
 | `orders-service` demo consumer | **implemented** | Proves producer → Kafka → consumer; logs receipt with continued trace. Not a real processor. |
 | `incident-correlator` | **implemented** (Phase 3) | Consumes `anomaly.events`; correlates anomalies into incidents. Idempotent, at-least-once, offset committed only after the DB transaction. |
+| `rca-agent` | **implemented** (Phase 4) | Consumes `incident.events`; `incident.opened` → one bounded RCA investigation per incident. Idempotent (skips if an investigation already exists); malformed → `incident.events.dlq`. |
 | ML feature capture | not planned as a stream consumer | *Reads telemetry, not this stream.* |
 | Audit | planned (Phase 5) | Durable record. |
 

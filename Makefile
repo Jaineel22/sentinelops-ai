@@ -19,7 +19,8 @@ PY := $(BIN)/python
         ml-test data-prepare nab-download ml-experiments ml-experiment ml-infer-demo \
         ml-docker-build \
         db-migrate db-revision run-correlator run-detector incident-scenario \
-        docker-build-correlator docker-build-detector
+        docker-build-correlator docker-build-detector \
+        db-migrate-rca run-rca rca-scenario rca-e2e-scenario docker-build-rca
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -27,14 +28,14 @@ help: ## Show this help
 venv: ## Create the virtual environment
 	python -m venv $(VENV)
 
-install: ## Install runtime + dev + ml + incident dependencies (editable)
+install: ## Install runtime + dev + ml + incident + rca dependencies (editable)
 	$(PY) -m pip install --upgrade pip
-	$(PY) -m pip install -e ".[dev,ml,incident,detector]"
+	$(PY) -m pip install -e ".[dev,ml,incident,detector,rca]"
 
 test: ## Run unit tests (no broker / DB needed)
 	$(PY) -m pytest
 
-test-integration: ## Run integration tests (needs `make compose-up` + `make db-migrate`)
+test-integration: ## Run integration tests (needs kafka+postgres up + db-migrate + db-migrate-rca)
 	KAFKA_BOOTSTRAP_SERVERS=localhost:29092 \
 	DB_URL=postgresql+asyncpg://sentinelops:sentinelops@localhost:5432/sentinelops \
 	DB_TEST_URL=postgresql+asyncpg://sentinelops:sentinelops@localhost:5432/sentinelops \
@@ -84,6 +85,9 @@ docker-build-correlator: ## Build the incident-correlator image
 docker-build-detector: ## Build the anomaly-detector image
 	docker build -f services/anomaly-detector/Dockerfile -t sentinelops-ai:anomaly-detector .
 
+docker-build-rca: ## Build the rca-agent image
+	docker build -f services/rca-agent/Dockerfile -t sentinelops-ai:rca-agent .
+
 # --- Phase 3: incident correlation -------------------------------------
 DB_URL ?= postgresql+asyncpg://sentinelops:sentinelops@localhost:5432/sentinelops
 
@@ -104,6 +108,21 @@ run-detector: ## Run anomaly-detector locally (:8003) against localhost
 
 incident-scenario: ## Deterministic end-to-end demo: telemetry -> anomalies -> ONE incident
 	$(PY) scripts/incident_scenario.py
+
+# --- Phase 4: AI RCA agent ---------------------------------------------
+db-migrate-rca: ## Apply rca-agent DB migrations (needs Postgres up)
+	cd services/rca-agent && DB_URL=$(DB_URL) $(abspath $(BIN))/alembic upgrade head
+
+run-rca: ## Run rca-agent locally (:8004) against localhost (RCA_MODE=mock)
+	KAFKA_BOOTSTRAP_SERVERS=localhost:29092 DB_URL=$(DB_URL) APP_PORT=8004 \
+	KAFKA_CONSUMER_GROUP=rca-agent RCA_INCIDENT_API_BASE_URL=http://localhost:8002 \
+	$(PY) -m rca_agent
+
+rca-scenario: ## Deterministic in-process demo: one incident -> investigation -> RCA
+	$(PY) scripts/rca_scenario.py
+
+rca-e2e-scenario: ## Deterministic full-chain demo: incident.opened (Kafka shape) -> RCA -> API
+	$(PY) scripts/rca_e2e_scenario.py
 
 # --- Phase 2: ML anomaly detection ---------------------------------------
 ml-test: ## Run only the ML test suite

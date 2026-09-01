@@ -26,6 +26,11 @@ supersedes the old one and update the status line.
 | [016](adr-016-idempotent-kafka-consumer.md) | Idempotent Kafka consumer with at-least-once semantics | Accepted |
 | [017](adr-017-incident-state-machine.md) | Incident lifecycle state machine | Accepted |
 | [018](adr-018-kafka-partitioning-strategy.md) | Kafka partitioning by correlation key | Accepted |
+| [019](adr-019-rca-agent-service-and-boundary.md) | Phase 4 RCA agent — separate service, shared database, structural Phase 5 boundary | Accepted |
+| [020](adr-020-controlled-read-only-evidence-tools.md) | Controlled, read-only, allow-listed evidence tools | Accepted |
+| [021](adr-021-llm-boundary-and-injection-defense.md) | LLM boundary — deterministic authority, structured output, prompt-injection quarantine | Accepted |
+| [022](adr-022-live-llm-provider.md) | Live LLM provider — Anthropic behind the existing boundary, forced-tool-use structured output | Accepted |
+| [023](adr-023-rca-agent-integration.md) | RCA-agent integration — event idempotency, async API, no Phase 3 write-back | Accepted |
 
 ## Template
 

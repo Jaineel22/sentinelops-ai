@@ -19,8 +19,9 @@ classifiers = [
 ]
 
 # The dependency surface grows one phase at a time. Phase 0 added FastAPI +
-# config. Phase 1 adds the Kafka client (aiokafka) and OpenTelemetry. ML, LLM,
-# and database libraries are still deferred to the phases that use them.
+# config; Phase 1 the Kafka client (aiokafka) + OpenTelemetry. ML (Phase 2),
+# database (Phase 3), and LangGraph + the LLM SDK (Phase 4) live in the optional
+# groups below so only the services that need them pull them in.
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -56,6 +57,18 @@ incident = [
 detector = [
     "httpx>=0.27",
 ]
+# AI RCA / investigation agent (Phase 4). Owns its own tables (shares the
+# incident DB stack), calls the Incident API over HTTP, and runs the bounded
+# investigation as a LangGraph state machine. `anthropic` is the live-mode LLM
+# provider SDK (Sub-phase 4D); RCA_MODE=mock needs none of it.
+rca = [
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "httpx>=0.27",
+    "langgraph>=1.0,<2.0",
+    "anthropic>=1.0,<2.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -75,6 +88,7 @@ packages = [
     "apps/orders-service/orders_service",
     "services/anomaly-detector/anomaly_detector",
     "services/incident-correlator/incident_correlator",
+    "services/rca-agent/rca_agent",
     "ml",
 ]
 
@@ -87,11 +101,12 @@ pythonpath = [
     "apps/orders-service",
     "services/anomaly-detector",
     "services/incident-correlator",
+    "services/rca-agent",
     ".",
 ]
 asyncio_mode = "auto"
 markers = [
-    "integration: tests that need a running Kafka broker (deselected by default)",
+    "integration: tests that need a running Kafka broker and/or PostgreSQL (deselected by default)",
 ]
 filterwarnings = [
     # Starlette's TestClient warns that it uses httpx; not actionable for us.
@@ -107,11 +122,15 @@ src = [
     "apps/orders-service",
     "services/anomaly-detector",
     "services/incident-correlator",
+    "services/rca-agent",
     "ml",
     "tests",
     "scripts",
 ]
-extend-exclude = ["services/incident-correlator/migrations"]
+extend-exclude = [
+    "services/incident-correlator/migrations",
+    "services/rca-agent/migrations",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -125,6 +144,7 @@ files = [
     "apps/orders-service",
     "services/anomaly-detector",
     "services/incident-correlator",
+    "services/rca-agent",
     "ml",
     "tests",
     "scripts",
@@ -135,8 +155,12 @@ mypy_path = [
     "apps/orders-service",
     "services/anomaly-detector",
     "services/incident-correlator",
+    "services/rca-agent",
 ]
-exclude = ["services/incident-correlator/migrations/"]
+exclude = [
+    "services/incident-correlator/migrations/",
+    "services/rca-agent/migrations/",
+]
 
 [[tool.mypy.overrides]]
 # These ship incomplete or no type information.
@@ -151,5 +175,7 @@ module = [
     "joblib.*",
     "asyncpg.*",
     "alembic.*",
+    "langgraph.*",
+    "langchain_core.*",
 ]
 ignore_missing_imports = true

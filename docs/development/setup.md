@@ -1,6 +1,6 @@
 # Development Setup
 
-Every command here works today (through Phase 3). Windows (PowerShell and Git
+Every command here works today (through Phase 4). Windows (PowerShell and Git
 Bash) and Unix instructions are given.
 
 ## Prerequisites
@@ -40,13 +40,14 @@ python -m venv .venv
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev,ml,incident,detector]"
+python -m pip install -e ".[dev,ml,incident,detector,rca]"
 ```
 
 `-e` (editable) means source changes take effect without reinstalling. `[dev]`
 adds pytest, httpx, Ruff, and mypy; `[ml]` adds pandas, NumPy, scikit-learn,
 SciPy, matplotlib, and joblib (Phase 2); `[incident]` adds SQLAlchemy, asyncpg,
-and Alembic and `[detector]` adds httpx (Phase 3). Drop extras you don't need.
+and Alembic and `[detector]` adds httpx (Phase 3); `[rca]` adds `langgraph` and
+the `anthropic` SDK (Phase 4). Drop extras you don't need.
 
 ## 4. Environment configuration
 
@@ -116,12 +117,13 @@ Tear down: `docker compose down` (add `-v` to drop volumes).
 pytest                     # unit tests (no broker needed) — or: make test
 ```
 
-Integration tests (need a broker; the Phase 3 ones also need PostgreSQL):
+Integration tests (need a broker; the Phase 3/4 ones also need PostgreSQL):
 
 ```bash
 docker compose up -d kafka postgres
-make db-migrate                    # alembic upgrade head against localhost:5432
-make test-integration              # sets KAFKA_BOOTSTRAP_SERVERS + DB_URL + DB_TEST_URL
+make db-migrate                    # incident lineage — alembic upgrade head
+make db-migrate-rca               # rca lineage (alembic_version_rca)
+make test-integration             # sets KAFKA_BOOTSTRAP_SERVERS + DB_URL + DB_TEST_URL
 ```
 
 ## 8. Phase 2: ML anomaly detection
@@ -156,9 +158,10 @@ make data-prepare                                   # -> ml/data/processed/senti
 ## 9. Phase 3: incident correlation
 
 ```bash
-# Everything (Phases 1 + 3):
+# Everything (Phases 1 + 3 + 4):
 docker compose up --build
-#   orders-service :8001 · incident-correlator :8002 · anomaly-detector :8003 · postgres :5432
+#   orders-service :8001 · incident-correlator :8002 · anomaly-detector :8003
+#   rca-agent :8004 · postgres :5432
 
 # Watch an incident form from injected faults:
 python scripts/generate_traffic.py --scenario sequence --duration 40 --rate 6
@@ -184,6 +187,34 @@ Schema changes: edit
 `services/incident-correlator/incident_correlator/db/models.py`, then
 `make db-revision MSG="..."`, review the generated file, `make db-migrate`.
 
+## 9b. Phase 4: AI RCA agent
+
+`rca-agent` consumes `incident.opened` and investigates. `RCA_MODE=mock` (the
+default) needs **no LLM API key**.
+
+```bash
+# Deterministic full-chain demo — no Kafka, no DB, no key:
+make rca-e2e-scenario            # incident.opened envelope -> consumer -> RCA -> API
+
+# In the running stack (docker compose up), after an incident forms:
+curl -s "http://localhost:8004/incidents/<incident-id>/investigation" | python -m json.tool
+curl -X POST http://localhost:8004/investigations \
+     -H 'content-type: application/json' -d '{"incident_id":"<incident-id>"}'
+curl -s "http://localhost:8004/investigations/<rca-id>"       | python -m json.tool
+curl -s "http://localhost:8004/investigations/<rca-id>/steps" | python -m json.tool  # just the trace
+
+# On the host instead:
+make db-migrate-rca
+make run-rca &                   # :8004  (RCA_MODE=mock)
+
+# Live LLM (opt-in; key stays in your shell, never committed):
+RCA_MODE=live LLM_PROVIDER=anthropic LLM_API_KEY=sk-ant-... docker compose up --build rca-agent
+```
+
+Schema changes: edit `services/rca-agent/rca_agent/db/models.py`, then
+`cd services/rca-agent && alembic revision --autogenerate -m "..."` (its own
+`alembic_version_rca` lineage), review, `make db-migrate-rca`.
+
 ## 10. Lint, format, type-check
 
 ```bash
@@ -207,6 +238,7 @@ Run `make help` for the full list. Common ones:
 | `make compose-up` / `make compose-down` / `make compose-logs` | Compose environment |
 | `make traffic SCENARIO=latency` | run the traffic generator |
 | `make db-migrate` / `make run-correlator` / `make run-detector` / `make incident-scenario` | Phase 3 |
+| `make db-migrate-rca` / `make run-rca` / `make rca-scenario` / `make rca-e2e-scenario` | Phase 4 |
 | `make ml-experiments` / `make ml-experiment NAME=...` | run Phase 2 experiments |
 | `make nab-download` / `make data-prepare` | Track B data / rebuild processed datasets |
 

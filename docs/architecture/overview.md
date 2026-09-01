@@ -8,27 +8,28 @@ tracks what is actually built. It is updated at the end of every phase.
 - **IMPLEMENTED** — exists in the repository and is tested.
 - **PLANNED** — target design; no code yet.
 
-## Current state (through Phase 1)
+## Current state (through Phase 4)
 
 **IMPLEMENTED**
 
 - **Phase 0:** platform API skeleton (`apps/api/sentinelops_api`) with
   `GET /health` and `GET /`; typed env-var config; test/lint/type-check/Docker/CI
   scaffolding.
-- **Phase 1:**
-  - `orders-service` (`apps/orders-service`) — a demo app under observation:
-    `POST /orders`, `GET /orders/{id}`, `/health`, `/ready`, `/metrics`,
-    dev-only `/admin/simulation`.
-  - Kafka event backbone: single-node KRaft broker in Docker Compose; topic
-    `orders.events`; versioned `order.created` event envelope
-    ([events.md](events.md)).
-  - OpenTelemetry instrumentation of `orders-service`: HTTP + business spans,
-    Prometheus-scraped metrics, structured JSON logs with trace correlation.
-  - A demo consumer proving producer → Kafka → consumer and trace continuation.
-  - Development-only failure injection + a traffic generator for reproducible
-    telemetry scenarios ([telemetry-scenarios.md](../development/telemetry-scenarios.md)).
+- **Phase 1:** `orders-service` demo app; Kafka event backbone (`orders.events`,
+  versioned `order.created`); OpenTelemetry instrumentation; a trace-continuing
+  demo consumer; dev-only failure injection + a traffic generator.
+- **Phase 2:** the `ml/` offline anomaly-detection pipeline (leak-safe dataset,
+  23-feature layer, Isolation Forest primary, window/event evaluation, NAB track).
+- **Phase 3:** `anomaly-detector` (live scrape/score/publish) + `incident-correlator`
+  (deterministic correlation + severity, PostgreSQL persistence, idempotent Kafka
+  consumer, Incident API, `incident.*` lifecycle events).
+- **Phase 4:** `rca-agent` — the `incident.opened` consumer, the bounded LangGraph
+  investigation engine, the closed read-only evidence-tool registry, the mock /
+  live (`AnthropicLlmClient`) LLM boundary, deterministic `validate_report`, the
+  Investigation HTTP API, and Docker Compose integration (`rca-migrate` +
+  `rca-agent`). Recommendation-only — no executor.
 
-See [phase-1.md](phase-1.md). Everything below not listed above is **PLANNED**.
+See the per-phase docs. Sections 6-10 below are **PLANNED**.
 
 ## Target architecture
 
@@ -86,15 +87,34 @@ Incident API (`:8002`) serves queries and manual lifecycle transitions, and
 `incident.*` lifecycle events are published for Phase 4. **Redis** was
 considered and not needed (ADR-014). See [phase-3.md](phase-3.md).
 
-### 5. AI RCA agent — PLANNED
+### 5. AI RCA agent — IMPLEMENTED (Phase 4)
 
-An explicit state-machine agent (**LangGraph** or equivalent) reacts to
-`incident.created`. It investigates by calling a fixed, **allow-listed** set of
-read-only evidence tools: metrics query, log query, trace lookup, service
-dependency lookup, recent deployments, and historical-incident search. It
-produces an **evidence-backed** root-cause analysis and a remediation proposal.
-The agent has no unrestricted infrastructure access:
-[ADR-002](../decisions/adr-002-ml-and-llm-separation.md).
+`services/rca-agent` reacts to the Phase 3 `incident.opened` Kafka event and runs
+an explicit **LangGraph** investigation state machine
+(`plan → collect → analyze → verify → synthesize → validate`) over the incident.
+Evidence comes only through a fixed, closed registry of **read-only** tools
+(incident / anomaly / timeline / related-incident / point-in-time metrics /
+health — with logs, traces, deployments and dependencies registered but
+explicitly unavailable, never fabricated —
+[ADR-020](../decisions/adr-020-controlled-read-only-evidence-tools.md)). The LLM
+only *proposes* plans, hypotheses and a synthesis; deterministic code owns the
+tool allow-list, argument validation, resource limits, evidence ids, state
+transitions, and a final `validate_report` gate — and there is **no executor**,
+so a prompt injection in evidence cannot cause an action
+([ADR-021](../decisions/adr-021-llm-boundary-and-injection-defense.md)). Output
+is a strongly typed, evidence-grounded `RCAReport` whose recommendation always
+requires human approval. A deterministic mock reasoner drives the same graph in
+CI; `RCA_MODE=live` swaps in `AnthropicLlmClient` behind the same `LlmClient`
+protocol (forced-tool-use structured output, bounded, key held as a `SecretStr` —
+[ADR-022](../decisions/adr-022-live-llm-provider.md)). An idempotent Kafka
+consumer (one investigation per incident) triggers investigations; a small HTTP
+API (`POST /investigations`, `GET /investigations/{id}` and `/steps`,
+`GET /incidents/{id}/investigation`) exposes their state, trace, and report;
+`docker compose up` runs the whole chain with no API key
+([ADR-023](../decisions/adr-023-rca-agent-integration.md)). See
+[phase-4.md](phase-4.md) ·
+[ADR-002](../decisions/adr-002-ml-and-llm-separation.md) ·
+[ADR-019](../decisions/adr-019-rca-agent-service-and-boundary.md).
 
 ### 6. Human-approved remediation — PLANNED
 
@@ -140,8 +160,8 @@ retraining workflow. Training/evaluation is reproducible.
 | Repo & dev foundation | 0 (done) |
 | Kafka + first instrumented service | 1 (done) |
 | ML anomaly detection + offline evaluation | 2 (done, offline) |
-| Incident correlation + PostgreSQL | 3 |
-| AI RCA agent + evidence tools | 4 |
+| Incident correlation + PostgreSQL | 3 (done) |
+| AI RCA agent + evidence tools | 4 (done) |
 | Approval + remediation + verification + audit | 5 |
 | MLflow + monitoring + drift + retraining | 6 |
 | Observability stack | 7 |
@@ -153,11 +173,11 @@ retraining workflow. Training/evaluation is reproducible.
 | --- | --- |
 | `apps/api/` | The SentinelOps platform API (Phase 0). |
 | `apps/orders-service/` | Demo app under observation (Phase 1). |
-| `services/` | SentinelOps-internal event processors — `anomaly-detector` (live scoring) and `incident-correlator` (correlation + persistence + Incident API), Phase 3. |
+| `services/` | SentinelOps-internal event processors — `anomaly-detector` (live scoring) and `incident-correlator` (correlation + persistence + Incident API), Phase 3; `rca-agent` (AI investigation + Investigation API), Phase 4. |
 | `libs/sentinelops_common/` | Shared library: Kafka event envelope, JSON logging + OpenTelemetry setup, JSON producer, idempotent consumer. |
 | `ml/` | ML anomaly-detection subsystem: collection, data, features, models, evaluation, experiments, inference (Phase 2). |
 | `artifacts/` | `reports/` (committed experiment results), `models/` (git-ignored). |
-| `scripts/` | Developer utilities (e.g. `generate_traffic.py`). |
+| `scripts/` | Developer utilities: `generate_traffic.py`, `incident_scenario.py` (Phase 3 demo), `rca_scenario.py` / `rca_e2e_scenario.py` (Phase 4 demos). |
 | `infrastructure/` | `docker/`, `kubernetes/`, `terraform/` (Phase 7-8). |
 | `tests/` | Tests, one subpackage per component (`tests/orders_service/`, `tests/ml/`). |
 | `docs/` | `architecture/`, `decisions/` (ADRs), `development/`, `phases/`. |

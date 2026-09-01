@@ -67,11 +67,38 @@ correlated incident queryable via the API; unit + `-m integration` (Kafka +
 Postgres) + all Phase 0/1/2 tests pass; no LLM in correlation or severity; no
 Phase 4 functionality present.
 
-## Phase 4 — AI RCA agent with controlled tools — planned
+## Phase 4 — AI RCA agent with controlled tools — done
 
-LangGraph (or equivalent) agent reacting to `incident.created`; fixed
-allow-listed read-only evidence tools; evidence-backed RCA output. See
-[ADR-002](../decisions/adr-002-ml-and-llm-separation.md).
+`services/rca-agent`: a bounded **LangGraph** investigation state machine that
+turns a Phase 3 incident into an evidence-grounded, machine-validated
+`RCAReport`. Sub-phases: **4A** foundation (domain, state machine, RCA schema,
+DB + migration, config) · **4B** the fixed closed registry of read-only evidence
+tools (incident/anomaly/timeline/related/metrics/health available; logs, traces,
+deployments, dependencies registered-but-unavailable, never fabricated) · **4C**
+the engine (`plan → collect → analyze → verify → synthesize → validate`), a
+deterministic mock reasoner, the `LlmClient` boundary, prompt-injection
+quarantine, `validate_report` gate, and persistence · **4D** the live LLM
+provider (`AnthropicLlmClient` behind the same protocol — forced-tool-use
+structured output into the existing DTOs, bounded timeout / prompt size /
+retries, `LLM_API_KEY` as a `SecretStr`; `RCA_MODE=mock` stays the CI default and
+never a silent fallback) · **4E** integration — an idempotent `incident.opened`
+Kafka consumer (one investigation per incident), the Investigation HTTP API
+(`POST /investigations`, `GET /investigations/{id}[/steps]`,
+`GET /incidents/{id}/investigation`) with background execution, Docker Compose
+(`rca-migrate` + `rca-agent`, mock mode = no API key), a deterministic full-chain
+scenario, and an outcome-class RCA-quality harness · **4G** final Docker / CI /
+README / docs pass. The LLM only proposes; deterministic code owns every safety
+boundary; there is no executor. `docs/architecture/phase-4.md`,
+[ADR-019](../decisions/adr-019-rca-agent-service-and-boundary.md)–[ADR-023](../decisions/adr-023-rca-agent-integration.md).
+
+**Exit criteria:** `docker compose up` brings up Kafka + Postgres + all four
+services + both migration one-shots; an injected-fault telemetry sequence
+produces an `incident.opened` that the rca-agent turns into a persisted,
+evidence-grounded `RCAReport` retrievable via the Investigation API; unit +
+`-m integration` (real Kafka + Postgres) + all Phase 0–3 tests pass;
+`RCA_MODE=mock` (no API key) is the CI default; the recommended action always
+requires human approval and no executor exists (ADR-003); no Phase 5
+functionality present.
 
 ## Phase 5 — Human-approved remediation — planned
 
