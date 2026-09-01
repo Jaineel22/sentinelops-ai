@@ -1,0 +1,185 @@
+{
+  "experiment": "exp5_nab_realknowncause",
+  "title": "Exp 5 - Methodology on NAB (realKnownCause)",
+  "rationale": "Independent benchmark: run the same robust-z-score baseline and Isolation Forest (on engineered rolling features) per series, with each threshold calibrated to a 5% false-positive budget. Does the methodology transfer to real-world anomaly series unrelated to our fault generator?",
+  "track": "B (NAB benchmark)",
+  "family": "realKnownCause",
+  "series": [
+    "realKnownCause/machine_temperature_system_failure.csv",
+    "realKnownCause/ambient_temperature_system_failure.csv",
+    "realKnownCause/nyc_taxi.csv"
+  ],
+  "generated_at": "2026-08-31T16:59:36.139081+00:00",
+  "git_sha": "0636210",
+  "ml_version": "0.2.0",
+  "python": "3.14.5",
+  "random_seed": 42,
+  "feature_names": [
+    "value",
+    "residual",
+    "abs_residual",
+    "local_z",
+    "roll_std",
+    "range",
+    "dist_from_median",
+    "baseline_residual",
+    "baseline_z",
+    "value_delta",
+    "value_delta_abs"
+  ],
+  "evaluation": "per-series chronological 20/15/65 split (short probationary train); threshold calibrated to <= 5% FPR on validation; macro-averaged across series",
+  "results": {
+    "robust_zscore": {
+      "supervised": false,
+      "per_series": {
+        "realKnownCause/machine_temperature_system_failure.csv": {
+          "n": 14752,
+          "n_anomaly": 1134,
+          "anomaly_fraction": 0.0769,
+          "precision": 0.13,
+          "recall": 0.112,
+          "f1": 0.1203,
+          "false_positive_rate": 0.0624,
+          "false_negative_rate": 0.888,
+          "accuracy": 0.8741,
+          "confusion_matrix": {
+            "tp": 127,
+            "fp": 850,
+            "fn": 1007,
+            "tn": 12768
+          },
+          "pr_auc": 0.213,
+          "roc_auc": 0.8524,
+          "event_recall": 1.0,
+          "n_test": 14752
+        },
+        "realKnownCause/ambient_temperature_system_failure.csv": {
+          "n": 4724,
+          "n_anomaly": 726,
+          "anomaly_fraction": 0.1537,
+          "precision": 0.2869,
+          "recall": 0.4146,
+          "f1": 0.3392,
+          "false_positive_rate": 0.1871,
+          "false_negative_rate": 0.5854,
+          "accuracy": 0.7517,
+          "confusion_matrix": {
+            "tp": 301,
+            "fp": 748,
+            "fn": 425,
+            "tn": 3250
+          },
+          "pr_auc": 0.2483,
+          "roc_auc": 0.6843,
+          "event_recall": 1.0,
+          "n_test": 4724
+        },
+        "realKnownCause/nyc_taxi.csv": {
+          "n": 6708,
+          "n_anomaly": 1035,
+          "anomaly_fraction": 0.1543,
+          "precision": 0.125,
+          "recall": 0.0667,
+          "f1": 0.087,
+          "false_positive_rate": 0.0851,
+          "false_negative_rate": 0.9333,
+          "accuracy": 0.784,
+          "confusion_matrix": {
+            "tp": 69,
+            "fp": 483,
+            "fn": 966,
+            "tn": 5190
+          },
+          "pr_auc": 0.1407,
+          "roc_auc": 0.4415,
+          "event_recall": 0.8,
+          "n_test": 6708
+        }
+      },
+      "macro_average": {
+        "precision": 0.1806,
+        "recall": 0.1978,
+        "f1": 0.1822,
+        "false_positive_rate": 0.1115,
+        "pr_auc": 0.2007,
+        "roc_auc": 0.6594
+      }
+    },
+    "isolation_forest": {
+      "supervised": false,
+      "per_series": {
+        "realKnownCause/machine_temperature_system_failure.csv": {
+          "n": 14752,
+          "n_anomaly": 1134,
+          "anomaly_fraction": 0.0769,
+          "precision": 0.1261,
+          "recall": 0.075,
+          "f1": 0.094,
+          "false_positive_rate": 0.0433,
+          "false_negative_rate": 0.925,
+          "accuracy": 0.889,
+          "confusion_matrix": {
+            "tp": 85,
+            "fp": 589,
+            "fn": 1049,
+            "tn": 13029
+          },
+          "pr_auc": 0.1858,
+          "roc_auc": 0.818,
+          "event_recall": 1.0,
+          "n_test": 14752
+        },
+        "realKnownCause/ambient_temperature_system_failure.csv": {
+          "n": 4724,
+          "n_anomaly": 726,
+          "anomaly_fraction": 0.1537,
+          "precision": 0.2796,
+          "recall": 0.2342,
+          "f1": 0.2549,
+          "false_positive_rate": 0.1096,
+          "false_negative_rate": 0.7658,
+          "accuracy": 0.7896,
+          "confusion_matrix": {
+            "tp": 170,
+            "fp": 438,
+            "fn": 556,
+            "tn": 3560
+          },
+          "pr_auc": 0.2244,
+          "roc_auc": 0.6395,
+          "event_recall": 1.0,
+          "n_test": 4724
+        },
+        "realKnownCause/nyc_taxi.csv": {
+          "n": 6708,
+          "n_anomaly": 1035,
+          "anomaly_fraction": 0.1543,
+          "precision": 0.1032,
+          "recall": 0.0599,
+          "f1": 0.0758,
+          "false_positive_rate": 0.095,
+          "false_negative_rate": 0.9401,
+          "accuracy": 0.7746,
+          "confusion_matrix": {
+            "tp": 62,
+            "fp": 539,
+            "fn": 973,
+            "tn": 5134
+          },
+          "pr_auc": 0.1357,
+          "roc_auc": 0.4444,
+          "event_recall": 0.8,
+          "n_test": 6708
+        }
+      },
+      "macro_average": {
+        "precision": 0.1696,
+        "recall": 0.123,
+        "f1": 0.1416,
+        "false_positive_rate": 0.0826,
+        "pr_auc": 0.182,
+        "roc_auc": 0.634
+      }
+    }
+  }
+}

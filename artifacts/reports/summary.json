@@ -1,0 +1,101 @@
+{
+  "seed": 42,
+  "experiments": {
+    "exp1_baseline_sentinelops": {
+      "robust_zscore": {
+        "precision": 0.75,
+        "recall": 0.6667,
+        "f1": 0.7059,
+        "false_positive_rate": 0.1333,
+        "pr_auc": 0.8188
+      }
+    },
+    "exp2_isolation_forest_sentinelops": {
+      "isolation_forest": {
+        "precision": 0.6923,
+        "recall": 1.0,
+        "f1": 0.8182,
+        "false_positive_rate": 0.2667,
+        "pr_auc": 0.6997
+      }
+    },
+    "exp3_comparison_sentinelops": {
+      "robust_zscore": {
+        "precision": 0.75,
+        "recall": 0.6667,
+        "f1": 0.7059,
+        "false_positive_rate": 0.1333,
+        "pr_auc": 0.8188
+      },
+      "isolation_forest": {
+        "precision": 0.6923,
+        "recall": 1.0,
+        "f1": 0.8182,
+        "false_positive_rate": 0.2667,
+        "pr_auc": 0.6997
+      },
+      "random_forest_supervised": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "false_positive_rate": 0.0,
+        "pr_auc": 1.0
+      }
+    },
+    "exp4_heldout_fault_sentinelops": {
+      "robust_zscore": {
+        "precision": 0.85,
+        "recall": 0.9444,
+        "f1": 0.8947,
+        "false_positive_rate": 0.0833,
+        "pr_auc": 0.777
+      },
+      "isolation_forest": {
+        "precision": 0.75,
+        "recall": 1.0,
+        "f1": 0.8571,
+        "false_positive_rate": 0.1667,
+        "pr_auc": 0.7348
+      },
+      "random_forest_supervised": {
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6667,
+        "false_positive_rate": 0.0,
+        "pr_auc": 0.7029
+      }
+    },
+    "exp5_nab_realknowncause": {
+      "robust_zscore": {
+        "precision": 0.1806,
+        "recall": 0.1978,
+        "f1": 0.1822,
+        "false_positive_rate": 0.1115,
+        "pr_auc": 0.2007
+      },
+      "isolation_forest": {
+        "precision": 0.1696,
+        "recall": 0.123,
+        "f1": 0.1416,
+        "false_positive_rate": 0.0826,
+        "pr_auc": 0.182
+      }
+    },
+    "exp6_nab_realawscloudwatch": {
+      "robust_zscore": {
+        "precision": 0.1381,
+        "recall": 0.4263,
+        "f1": 0.1432,
+        "false_positive_rate": 0.3453,
+        "pr_auc": 0.1148
+      },
+      "isolation_forest": {
+        "precision": 0.1091,
+        "recall": 0.3306,
+        "f1": 0.116,
+        "false_positive_rate": 0.2884,
+        "pr_auc": 0.1292
+      }
+    }
+  }
+}

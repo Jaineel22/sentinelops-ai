@@ -1,0 +1,278 @@
+{
+  "experiment": "exp3_comparison_sentinelops",
+  "title": "Exp 3 - Baseline vs Isolation Forest vs supervised RF",
+  "rationale": "Same chronological split, three detectors. Shows the ML lift over the baseline and the ceiling a supervised model reaches with labels.",
+  "generated_at": "2026-08-31T16:59:32.671307+00:00",
+  "git_sha": "0636210",
+  "ml_version": "0.2.0",
+  "python": "3.14.5",
+  "random_seed": 42,
+  "threshold_objective": "f1",
+  "feature_names": [
+    "request_rate",
+    "error_rate",
+    "success_rate",
+    "latency_mean_ms",
+    "latency_p50_ms",
+    "latency_p90_ms",
+    "latency_p95_ms",
+    "publish_rate",
+    "publish_error_rate",
+    "publish_latency_mean_ms",
+    "orders_created_rate",
+    "request_rate_roll_mean",
+    "request_rate_roll_std",
+    "request_rate_delta",
+    "error_rate_roll_mean",
+    "error_rate_delta",
+    "latency_mean_ms_roll_mean",
+    "latency_mean_ms_roll_std",
+    "latency_mean_ms_delta",
+    "latency_p95_ms_roll_mean",
+    "publish_error_rate_roll_mean",
+    "publish_latency_mean_ms_roll_mean",
+    "traffic_growth_rate"
+  ],
+  "split_sizes": {
+    "train": {
+      "n": 72,
+      "anomaly": 30
+    },
+    "val": {
+      "n": 24,
+      "anomaly": 6
+    },
+    "test": {
+      "n": 48,
+      "anomaly": 18
+    }
+  },
+  "notes": {
+    "dataset": "sentinelops/run_a",
+    "split": "chronological 50/17/33"
+  },
+  "results": {
+    "robust_zscore": {
+      "supervised": false,
+      "metadata": {
+        "model_type": "robust_zscore",
+        "feature_names": [
+          "request_rate",
+          "error_rate",
+          "success_rate",
+          "latency_mean_ms",
+          "latency_p50_ms",
+          "latency_p90_ms",
+          "latency_p95_ms",
+          "publish_rate",
+          "publish_error_rate",
+          "publish_latency_mean_ms",
+          "orders_created_rate",
+          "request_rate_roll_mean",
+          "request_rate_roll_std",
+          "request_rate_delta",
+          "error_rate_roll_mean",
+          "error_rate_delta",
+          "latency_mean_ms_roll_mean",
+          "latency_mean_ms_roll_std",
+          "latency_mean_ms_delta",
+          "latency_p95_ms_roll_mean",
+          "publish_error_rate_roll_mean",
+          "publish_latency_mean_ms_roll_mean",
+          "traffic_growth_rate"
+        ],
+        "hyperparameters": {
+          "mad_scale": 1.4826,
+          "min_scale": 1e-09,
+          "aggregation": "max_abs_z"
+        },
+        "random_seed": 42,
+        "training_dataset": "sentinelops/run_a",
+        "training_period": "2026-08-31T16:00:33.781641+00:00 .. 2026-08-31T16:15:17.065698+00:00",
+        "n_train_rows": 72,
+        "created_at": "2026-08-31T16:59:32.012716+00:00",
+        "ml_version": "0.2.0"
+      },
+      "model_path": "artifacts\\models\\exp3_comparison_sentinelops__robust_zscore.joblib",
+      "threshold": 399.926367,
+      "pointwise": {
+        "n": 48,
+        "n_anomaly": 18,
+        "anomaly_fraction": 0.375,
+        "precision": 0.75,
+        "recall": 0.6667,
+        "f1": 0.7059,
+        "false_positive_rate": 0.1333,
+        "false_negative_rate": 0.3333,
+        "accuracy": 0.7917,
+        "confusion_matrix": {
+          "tp": 12,
+          "fp": 4,
+          "fn": 6,
+          "tn": 26
+        },
+        "pr_auc": 0.8188,
+        "roc_auc": 0.9111
+      },
+      "eventwise": {
+        "n_events": 3,
+        "events_detected": 2,
+        "event_recall": 0.6667,
+        "mean_detection_delay_windows": 0.0,
+        "mean_detection_delay_seconds": 0.0,
+        "max_detection_delay_windows": 0,
+        "false_alarm_windows": 4,
+        "false_alarms_per_hour_normal": 47.72
+      }
+    },
+    "isolation_forest": {
+      "supervised": false,
+      "metadata": {
+        "model_type": "isolation_forest",
+        "feature_names": [
+          "request_rate",
+          "error_rate",
+          "success_rate",
+          "latency_mean_ms",
+          "latency_p50_ms",
+          "latency_p90_ms",
+          "latency_p95_ms",
+          "publish_rate",
+          "publish_error_rate",
+          "publish_latency_mean_ms",
+          "orders_created_rate",
+          "request_rate_roll_mean",
+          "request_rate_roll_std",
+          "request_rate_delta",
+          "error_rate_roll_mean",
+          "error_rate_delta",
+          "latency_mean_ms_roll_mean",
+          "latency_mean_ms_roll_std",
+          "latency_mean_ms_delta",
+          "latency_p95_ms_roll_mean",
+          "publish_error_rate_roll_mean",
+          "publish_latency_mean_ms_roll_mean",
+          "traffic_growth_rate"
+        ],
+        "hyperparameters": {
+          "n_estimators": 200,
+          "max_samples": "auto",
+          "contamination": "auto",
+          "random_state": 42,
+          "scaler": "standard"
+        },
+        "random_seed": 42,
+        "training_dataset": "sentinelops/run_a",
+        "training_period": "2026-08-31T16:00:33.781641+00:00 .. 2026-08-31T16:15:17.065698+00:00",
+        "n_train_rows": 72,
+        "created_at": "2026-08-31T16:59:32.191951+00:00",
+        "ml_version": "0.2.0"
+      },
+      "model_path": "artifacts\\models\\exp3_comparison_sentinelops__isolation_forest.joblib",
+      "threshold": 0.488133,
+      "pointwise": {
+        "n": 48,
+        "n_anomaly": 18,
+        "anomaly_fraction": 0.375,
+        "precision": 0.6923,
+        "recall": 1.0,
+        "f1": 0.8182,
+        "false_positive_rate": 0.2667,
+        "false_negative_rate": 0.0,
+        "accuracy": 0.8333,
+        "confusion_matrix": {
+          "tp": 18,
+          "fp": 8,
+          "fn": 0,
+          "tn": 22
+        },
+        "pr_auc": 0.6997,
+        "roc_auc": 0.8241
+      },
+      "eventwise": {
+        "n_events": 3,
+        "events_detected": 3,
+        "event_recall": 1.0,
+        "mean_detection_delay_windows": 0.0,
+        "mean_detection_delay_seconds": 0.0,
+        "max_detection_delay_windows": 0,
+        "false_alarm_windows": 8,
+        "false_alarms_per_hour_normal": 95.43
+      }
+    },
+    "random_forest_supervised": {
+      "supervised": true,
+      "metadata": {
+        "model_type": "random_forest_supervised",
+        "feature_names": [
+          "request_rate",
+          "error_rate",
+          "success_rate",
+          "latency_mean_ms",
+          "latency_p50_ms",
+          "latency_p90_ms",
+          "latency_p95_ms",
+          "publish_rate",
+          "publish_error_rate",
+          "publish_latency_mean_ms",
+          "orders_created_rate",
+          "request_rate_roll_mean",
+          "request_rate_roll_std",
+          "request_rate_delta",
+          "error_rate_roll_mean",
+          "error_rate_delta",
+          "latency_mean_ms_roll_mean",
+          "latency_mean_ms_roll_std",
+          "latency_mean_ms_delta",
+          "latency_p95_ms_roll_mean",
+          "publish_error_rate_roll_mean",
+          "publish_latency_mean_ms_roll_mean",
+          "traffic_growth_rate"
+        ],
+        "hyperparameters": {
+          "n_estimators": 300,
+          "max_depth": 8,
+          "class_weight": "balanced",
+          "random_state": 42
+        },
+        "random_seed": 42,
+        "training_dataset": "sentinelops/run_a",
+        "training_period": "2026-08-31T16:00:33.781641+00:00 .. 2026-08-31T16:15:17.065698+00:00",
+        "n_train_rows": 72,
+        "created_at": "2026-08-31T16:59:32.559468+00:00",
+        "ml_version": "0.2.0"
+      },
+      "model_path": "artifacts\\models\\exp3_comparison_sentinelops__random_forest_supervised.joblib",
+      "threshold": 0.53,
+      "pointwise": {
+        "n": 48,
+        "n_anomaly": 18,
+        "anomaly_fraction": 0.375,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "false_positive_rate": 0.0,
+        "false_negative_rate": 0.0,
+        "accuracy": 1.0,
+        "confusion_matrix": {
+          "tp": 18,
+          "fp": 0,
+          "fn": 0,
+          "tn": 30
+        },
+        "pr_auc": 1.0,
+        "roc_auc": 1.0
+      },
+      "eventwise": {
+        "n_events": 3,
+        "events_detected": 3,
+        "event_recall": 1.0,
+        "mean_detection_delay_windows": 0.0,
+        "mean_detection_delay_seconds": 0.0,
+        "max_detection_delay_windows": 0,
+        "false_alarm_windows": 0,
+        "false_alarms_per_hour_normal": 0.0
+      }
+    }
+  }
+}

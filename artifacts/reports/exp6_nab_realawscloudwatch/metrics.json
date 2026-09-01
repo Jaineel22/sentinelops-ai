@@ -1,0 +1,142 @@
+{
+  "experiment": "exp6_nab_realawscloudwatch",
+  "title": "Exp 6 - Methodology on NAB (realAWSCloudwatch)",
+  "rationale": "Second independent NAB family (EC2 CPU utilisation), same per-series methodology and 5% FPR budget.",
+  "track": "B (NAB benchmark)",
+  "family": "realAWSCloudwatch",
+  "series": [
+    "realAWSCloudwatch/ec2_cpu_utilization_5f5533.csv",
+    "realAWSCloudwatch/ec2_cpu_utilization_fe7f93.csv"
+  ],
+  "generated_at": "2026-08-31T16:59:36.916425+00:00",
+  "git_sha": "0636210",
+  "ml_version": "0.2.0",
+  "python": "3.14.5",
+  "random_seed": 42,
+  "feature_names": [
+    "value",
+    "residual",
+    "abs_residual",
+    "local_z",
+    "roll_std",
+    "range",
+    "dist_from_median",
+    "baseline_residual",
+    "baseline_z",
+    "value_delta",
+    "value_delta_abs"
+  ],
+  "evaluation": "per-series chronological 20/15/65 split (short probationary train); threshold calibrated to <= 5% FPR on validation; macro-averaged across series",
+  "results": {
+    "robust_zscore": {
+      "supervised": false,
+      "per_series": {
+        "realAWSCloudwatch/ec2_cpu_utilization_5f5533.csv": {
+          "n": 2621,
+          "n_anomaly": 201,
+          "anomaly_fraction": 0.0767,
+          "precision": 0.089,
+          "recall": 0.7562,
+          "f1": 0.1593,
+          "false_positive_rate": 0.6426,
+          "false_negative_rate": 0.2438,
+          "accuracy": 0.388,
+          "confusion_matrix": {
+            "tp": 152,
+            "fp": 1555,
+            "fn": 49,
+            "tn": 865
+          },
+          "pr_auc": 0.1331,
+          "roc_auc": 0.5114,
+          "event_recall": 1.0,
+          "n_test": 2621
+        },
+        "realAWSCloudwatch/ec2_cpu_utilization_fe7f93.csv": {
+          "n": 2621,
+          "n_anomaly": 270,
+          "anomaly_fraction": 0.103,
+          "precision": 0.1871,
+          "recall": 0.0963,
+          "f1": 0.1271,
+          "false_positive_rate": 0.0481,
+          "false_negative_rate": 0.9037,
+          "accuracy": 0.8638,
+          "confusion_matrix": {
+            "tp": 26,
+            "fp": 113,
+            "fn": 244,
+            "tn": 2238
+          },
+          "pr_auc": 0.0965,
+          "roc_auc": 0.3721,
+          "event_recall": 0.5,
+          "n_test": 2621
+        }
+      },
+      "macro_average": {
+        "precision": 0.1381,
+        "recall": 0.4263,
+        "f1": 0.1432,
+        "false_positive_rate": 0.3453,
+        "pr_auc": 0.1148,
+        "roc_auc": 0.4417
+      }
+    },
+    "isolation_forest": {
+      "supervised": false,
+      "per_series": {
+        "realAWSCloudwatch/ec2_cpu_utilization_5f5533.csv": {
+          "n": 2621,
+          "n_anomaly": 201,
+          "anomaly_fraction": 0.0767,
+          "precision": 0.0859,
+          "recall": 0.602,
+          "f1": 0.1503,
+          "false_positive_rate": 0.5322,
+          "false_negative_rate": 0.398,
+          "accuracy": 0.4781,
+          "confusion_matrix": {
+            "tp": 121,
+            "fp": 1288,
+            "fn": 80,
+            "tn": 1132
+          },
+          "pr_auc": 0.1725,
+          "roc_auc": 0.6159,
+          "event_recall": 1.0,
+          "n_test": 2621
+        },
+        "realAWSCloudwatch/ec2_cpu_utilization_fe7f93.csv": {
+          "n": 2621,
+          "n_anomaly": 270,
+          "anomaly_fraction": 0.103,
+          "precision": 0.1322,
+          "recall": 0.0593,
+          "f1": 0.0818,
+          "false_positive_rate": 0.0447,
+          "false_negative_rate": 0.9407,
+          "accuracy": 0.863,
+          "confusion_matrix": {
+            "tp": 16,
+            "fp": 105,
+            "fn": 254,
+            "tn": 2246
+          },
+          "pr_auc": 0.0859,
+          "roc_auc": 0.3712,
+          "event_recall": 0.5,
+          "n_test": 2621
+        }
+      },
+      "macro_average": {
+        "precision": 0.1091,
+        "recall": 0.3306,
+        "f1": 0.116,
+        "false_positive_rate": 0.2884,
+        "pr_auc": 0.1292,
+        "roc_auc": 0.4935
+      }
+    }
+  }
+}
