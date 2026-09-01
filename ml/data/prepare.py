@@ -1,28 +1,33 @@
-"""Turn raw cumulative metric scrapes into per-window operational signals.
+"""Turn cumulative metric scrapes into per-window operational signals.
 
-Input : ``ml/data/raw/sentinelops/<run>/snapshots.csv``  (from the collector)
-Output: ``ml/data/processed/sentinelops/<run>/{windows.csv,labels.csv,manifest.json}``
+Batch: ``ml/data/raw/sentinelops/<run>/snapshots.csv``  (from the collector)
+   ->  ``ml/data/processed/sentinelops/<run>/{windows.csv,labels.csv,manifest.json}``
 
-A "window" is the interval between two consecutive scrapes *within the same
-scenario segment*. Boundary windows (scenario changed) and windows spanning a
-counter reset (process restart) are dropped, not silently miscounted.
+Streaming (Phase 3): the anomaly-detector reuses :func:`window_signals` on
+consecutive live :class:`~ml.data.prometheus_parse.MetricSnapshot` pairs.
+
+A "window" is the interval between two consecutive scrapes. In the batch path a
+window spanning a scenario boundary or a counter reset (process restart) is
+dropped, not silently miscounted.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from ml.config import PROCESSED_DIR, RAW_DIR
-from ml.data.prometheus_parse import estimate_quantile_from_bucket_deltas
+from ml.data.prometheus_parse import MetricSnapshot, estimate_quantile_from_bucket_deltas
 from ml.data.schema import LABEL_COLUMNS, META_COLUMNS, SIGNAL_COLUMNS
 from ml.data.validation import DataValidationError
 
-_CUMULATIVE_COLS = [
+# Fields that only ever grow while the process lives (a negative delta => restart).
+_CUMULATIVE_FIELDS = (
     "http_post_count_total",
     "http_post_count_2xx",
     "http_post_count_4xx",
@@ -33,16 +38,94 @@ _CUMULATIVE_COLS = [
     "publish_failure_total",
     "publish_latency_sum_s",
     "publish_latency_count",
-]
+)
 
 
-def _bucket_columns(df: pd.DataFrame) -> list[str]:
-    return [c for c in df.columns if c.startswith("http_post_bucket_")]
+def _safe_q(bucket_deltas: dict[float, float], q: float) -> float:
+    val = estimate_quantile_from_bucket_deltas(bucket_deltas, q)
+    return 0.0 if (val != val) else float(val)  # NaN -> 0 (no requests in window)
 
 
-def _le_of(col: str) -> float:
-    tag = col.removeprefix("http_post_bucket_")
-    return float("inf") if tag == "inf" else float(tag)
+def window_signals(prev: MetricSnapshot, cur: MetricSnapshot, dt: float) -> dict[str, float] | None:
+    """Per-window operational signals from two cumulative snapshots ``dt`` seconds
+    apart. Returns ``None`` if the window is invalid (``dt <= 0`` or a counter
+    reset happened between the scrapes)."""
+
+    if dt <= 0:
+        return None
+    if any(getattr(cur, f) - getattr(prev, f) < -1e-6 for f in _CUMULATIVE_FIELDS):
+        return None
+
+    req = max(cur.http_post_count_total - prev.http_post_count_total, 0.0)
+    denom = req if req > 0 else 1.0
+    d_5xx = max(cur.http_post_count_5xx - prev.http_post_count_5xx, 0.0)
+    d_2xx = max(cur.http_post_count_2xx - prev.http_post_count_2xx, 0.0)
+    d_lat_sum = cur.http_post_latency_sum_ms - prev.http_post_latency_sum_ms
+
+    prev_b, cur_b = prev.http_post_latency_buckets, cur.http_post_latency_buckets
+    bucket_deltas = {
+        le: max(cur_b.get(le, 0.0) - prev_b.get(le, 0.0), 0.0) for le in set(prev_b) | set(cur_b)
+    }
+
+    pub_ok = cur.publish_success_total - prev.publish_success_total
+    pub_fail = cur.publish_failure_total - prev.publish_failure_total
+    pub_attempts = max(pub_ok + pub_fail, 0.0)
+    pub_denom = pub_attempts if pub_attempts > 0 else 1.0
+    d_pub_lat_count = max(cur.publish_latency_count - prev.publish_latency_count, 0.0)
+    d_pub_lat_sum = cur.publish_latency_sum_s - prev.publish_latency_sum_s
+    d_created = max(cur.orders_created_total - prev.orders_created_total, 0.0)
+
+    return {
+        "request_rate": req / dt,
+        "error_rate": d_5xx / denom,
+        "success_rate": d_2xx / denom,
+        "latency_mean_ms": (d_lat_sum / denom if req > 0 else 0.0),
+        "latency_p50_ms": _safe_q(bucket_deltas, 0.50),
+        "latency_p90_ms": _safe_q(bucket_deltas, 0.90),
+        "latency_p95_ms": _safe_q(bucket_deltas, 0.95),
+        "publish_rate": pub_attempts / dt,
+        "publish_error_rate": max(pub_fail, 0.0) / pub_denom,
+        "publish_latency_mean_ms": (
+            1000.0 * d_pub_lat_sum / d_pub_lat_count if d_pub_lat_count > 0 else 0.0
+        ),
+        "orders_created_rate": d_created / dt,
+    }
+
+
+def _as_float(value: object) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _snapshot_from_row(row: Mapping[str, object]) -> MetricSnapshot:
+    """Reconstruct a :class:`MetricSnapshot` from a flattened collector CSV row."""
+
+    def f(key: str) -> float:
+        return _as_float(row.get(key, 0.0))
+
+    buckets: dict[float, float] = {}
+    for key, value in row.items():
+        if key.startswith("http_post_bucket_"):
+            tag = key.removeprefix("http_post_bucket_")
+            le = float("inf") if tag == "inf" else float(tag)
+            buckets[le] = _as_float(value)
+
+    return MetricSnapshot(
+        http_post_count_total=f("http_post_count_total"),
+        http_post_count_2xx=f("http_post_count_2xx"),
+        http_post_count_4xx=f("http_post_count_4xx"),
+        http_post_count_5xx=f("http_post_count_5xx"),
+        http_post_latency_sum_ms=f("http_post_latency_sum_ms"),
+        http_post_latency_count=f("http_post_latency_count"),
+        http_post_latency_buckets=buckets,
+        orders_created_total=f("orders_created_total"),
+        publish_success_total=f("publish_success_total"),
+        publish_failure_total=f("publish_failure_total"),
+        publish_latency_sum_s=f("publish_latency_sum_s"),
+        publish_latency_count=f("publish_latency_count"),
+    )
 
 
 def prepare_run(run_id: str, *, raw_root: Path | None = None, out_root: Path | None = None) -> Path:
@@ -55,52 +138,26 @@ def prepare_run(run_id: str, *, raw_root: Path | None = None, out_root: Path | N
     if len(raw) < 3:
         raise DataValidationError(f"run {run_id!r} has too few snapshots ({len(raw)})")
 
-    bucket_cols = _bucket_columns(raw)
     windows: list[dict[str, object]] = []
-
     for i in range(1, len(raw)):
-        prev, cur = raw.iloc[i - 1], raw.iloc[i]
-        if prev["scenario"] != cur["scenario"]:
+        prev_row, cur_row = raw.iloc[i - 1].to_dict(), raw.iloc[i].to_dict()
+        if prev_row["scenario"] != cur_row["scenario"]:
             continue  # segment boundary
-        dt = float(cur["scrape_ts"] - prev["scrape_ts"])
-        if dt <= 0:
+        dt = float(cur_row["scrape_ts"] - prev_row["scrape_ts"])
+        signals = window_signals(_snapshot_from_row(prev_row), _snapshot_from_row(cur_row), dt)
+        if signals is None:
             continue
-
-        deltas = {c: float(cur[c] - prev[c]) for c in _CUMULATIVE_COLS if c in raw.columns}
-        if any(v < -1e-6 for v in deltas.values()):
-            continue  # counter reset between scrapes
-
-        req = max(deltas["http_post_count_total"], 0.0)
-        denom = req if req > 0 else 1.0
-        bucket_deltas = {_le_of(c): max(float(cur[c] - prev[c]), 0.0) for c in bucket_cols}
-        pub_attempts = max(deltas["publish_success_total"] + deltas["publish_failure_total"], 0.0)
-        pub_denom = pub_attempts if pub_attempts > 0 else 1.0
-        pub_lat_count = max(deltas["publish_latency_count"], 0.0)
 
         windows.append(
             {
                 "run_id": run_id,
-                "window_start": prev["scrape_iso"],
-                "window_end": cur["scrape_iso"],
+                "window_start": prev_row["scrape_iso"],
+                "window_end": cur_row["scrape_iso"],
                 "window_seconds": round(dt, 3),
-                "request_rate": req / dt,
-                "error_rate": max(deltas["http_post_count_5xx"], 0.0) / denom,
-                "success_rate": max(deltas["http_post_count_2xx"], 0.0) / denom,
-                "latency_mean_ms": (deltas["http_post_latency_sum_ms"] / denom if req > 0 else 0.0),
-                "latency_p50_ms": _safe_q(bucket_deltas, 0.50),
-                "latency_p90_ms": _safe_q(bucket_deltas, 0.90),
-                "latency_p95_ms": _safe_q(bucket_deltas, 0.95),
-                "publish_rate": pub_attempts / dt,
-                "publish_error_rate": max(deltas["publish_failure_total"], 0.0) / pub_denom,
-                "publish_latency_mean_ms": (
-                    1000.0 * deltas["publish_latency_sum_s"] / pub_lat_count
-                    if pub_lat_count > 0
-                    else 0.0
-                ),
-                "orders_created_rate": max(deltas["orders_created_total"], 0.0) / dt,
-                "scenario": cur["scenario"],
-                "label": cur["label"],
-                "is_anomaly": int(cur["is_anomaly"]),
+                **signals,
+                "scenario": cur_row["scenario"],
+                "label": cur_row["label"],
+                "is_anomaly": int(cur_row["is_anomaly"]),
             }
         )
 
@@ -134,11 +191,6 @@ def prepare_run(run_id: str, *, raw_root: Path | None = None, out_root: Path | N
         f"labels {manifest['label_counts']}"
     )
     return out_dir
-
-
-def _safe_q(bucket_deltas: dict[float, float], q: float) -> float:
-    val = estimate_quantile_from_bucket_deltas(bucket_deltas, q)
-    return 0.0 if (val != val) else float(val)  # NaN -> 0 (no requests in window)
 
 
 def load_processed_run(run_id: str, *, root: Path | None = None) -> pd.DataFrame:

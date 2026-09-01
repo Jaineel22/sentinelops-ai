@@ -9,6 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE ./
+COPY libs/sentinelops_common ./libs/sentinelops_common
 COPY apps/api/sentinelops_api ./apps/api/sentinelops_api
 COPY apps/orders-service/orders_service ./apps/orders-service/orders_service
 RUN pip install --no-cache-dir .

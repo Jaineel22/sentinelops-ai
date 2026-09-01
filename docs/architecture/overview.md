@@ -42,11 +42,12 @@ are planned for Phase 7.
 
 ### 2. Event backbone — PARTIALLY IMPLEMENTED (Phase 1)
 
-**Apache Kafka** is the backbone. Phase 1 runs a single-node KRaft broker with
-one topic (`orders.events`) and one producer. Anomaly events, incident lifecycle
-events, agent findings, approval decisions, and remediation/verification
-outcomes are planned for their respective phases. Services are decoupled and
-independently deployable. Rationale:
+**Apache Kafka** is the backbone. A single-node KRaft broker carries
+`orders.events` (Phase 1) and, since Phase 3, `anomaly.events` and
+`incident.events` (plus `anomaly.events.dlq`). Agent findings, approval
+decisions, and remediation/verification outcomes are planned for their
+respective phases. Services are decoupled and independently deployable.
+Rationale:
 [ADR-001](../decisions/adr-001-event-driven-architecture.md),
 [ADR-006](../decisions/adr-006-kafka-local-deployment-and-client.md),
 [ADR-008](../decisions/adr-008-events-vs-telemetry.md).
@@ -63,17 +64,27 @@ benchmark track ([ADR-004](../decisions/adr-004-datasets-vs-live-telemetry.md),
 [ADR-013](../decisions/adr-013-nab-benchmark-track.md)). Reports live in
 `artifacts/reports/`.
 
-`ml.inference.DetectorService` gives Phase 3 a clean call: `score_window(signals)
-→ AnomalyResult`. **Not yet built:** a running service that consumes live
-telemetry and emits anomaly events onto Kafka (that wiring is Phase 3+). XGBoost
-and PyTorch remain deferred. See [phase-2.md](phase-2.md).
+`ml.inference.DetectorService` gives a clean call: `score_window(signals)
+→ AnomalyResult`. Phase 3's `anomaly-detector` service wraps it in a live
+scrape/score/publish loop. XGBoost and PyTorch remain deferred. See
+[phase-2.md](phase-2.md).
 
-### 4. Incident correlation — PLANNED
+### 4. Incident correlation — IMPLEMENTED (Phase 3)
 
-A service groups related anomaly events (by time, service dependency graph,
-deployment windows, and shared entities) into a single **incident**. Incidents
-are persisted in **PostgreSQL**. **Redis** may be used for correlation windows /
-deduplication caches where justified.
+The `incident-correlator` service consumes `anomaly.detected` and groups related
+anomalies for a service into a single **incident** using **deterministic,
+explainable** rules — a correlation key (`service:environment`) plus a
+configurable time window ([ADR-015](../decisions/adr-015-deterministic-anomaly-correlation.md)).
+No LLM. Severity is a deterministic rule engine (INFO…CRITICAL), every firing
+rule recorded. Incidents, their evidence, and an append-only state-transition
+history are persisted in **PostgreSQL** (SQLAlchemy + Alembic —
+[ADR-014](../decisions/adr-014-postgresql-for-incident-state.md)); a partial
+unique index enforces one active incident per key. The Kafka consumer is
+idempotent with at-least-once semantics
+([ADR-016](../decisions/adr-016-idempotent-kafka-consumer.md)). An internal
+Incident API (`:8002`) serves queries and manual lifecycle transitions, and
+`incident.*` lifecycle events are published for Phase 4. **Redis** was
+considered and not needed (ADR-014). See [phase-3.md](phase-3.md).
 
 ### 5. AI RCA agent — PLANNED
 
@@ -142,7 +153,8 @@ retraining workflow. Training/evaluation is reproducible.
 | --- | --- |
 | `apps/api/` | The SentinelOps platform API (Phase 0). |
 | `apps/orders-service/` | Demo app under observation (Phase 1). |
-| `services/` | SentinelOps-internal event processors — correlation, ML consumers (Phase 3+). |
+| `services/` | SentinelOps-internal event processors — `anomaly-detector` (live scoring) and `incident-correlator` (correlation + persistence + Incident API), Phase 3. |
+| `libs/sentinelops_common/` | Shared library: Kafka event envelope, JSON logging + OpenTelemetry setup, JSON producer, idempotent consumer. |
 | `ml/` | ML anomaly-detection subsystem: collection, data, features, models, evaluation, experiments, inference (Phase 2). |
 | `artifacts/` | `reports/` (committed experiment results), `models/` (git-ignored). |
 | `scripts/` | Developer utilities (e.g. `generate_traffic.py`). |

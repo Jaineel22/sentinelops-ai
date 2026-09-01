@@ -44,10 +44,23 @@ ml = [
     "matplotlib>=3.8",
     "joblib>=1.3",
 ]
+# Incident-correlation persistence (Phase 3). Only the incident-correlator
+# service needs a database.
+incident = [
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+]
+# Streaming anomaly-detector service (Phase 3): scrapes orders-service /metrics
+# over HTTP and reuses the Phase 2 model, so it needs the ml extra too.
+detector = [
+    "httpx>=0.27",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
+    "aiosqlite>=0.20",
     "ruff>=0.6",
     "mypy>=1.11",
 ]
@@ -57,15 +70,25 @@ Repository = "https://github.com/Jaineel22/sentinelops-ai"
 
 [tool.hatch.build.targets.wheel]
 packages = [
+    "libs/sentinelops_common",
     "apps/api/sentinelops_api",
     "apps/orders-service/orders_service",
+    "services/anomaly-detector/anomaly_detector",
+    "services/incident-correlator/incident_correlator",
     "ml",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --import-mode=importlib -m 'not integration'"
-pythonpath = ["apps/api", "apps/orders-service", "."]
+pythonpath = [
+    "libs",
+    "apps/api",
+    "apps/orders-service",
+    "services/anomaly-detector",
+    "services/incident-correlator",
+    ".",
+]
 asyncio_mode = "auto"
 markers = [
     "integration: tests that need a running Kafka broker (deselected by default)",
@@ -78,7 +101,17 @@ filterwarnings = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["apps/api", "apps/orders-service", "ml", "tests", "scripts"]
+src = [
+    "libs",
+    "apps/api",
+    "apps/orders-service",
+    "services/anomaly-detector",
+    "services/incident-correlator",
+    "ml",
+    "tests",
+    "scripts",
+]
+extend-exclude = ["services/incident-correlator/migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -86,8 +119,24 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["apps/api", "apps/orders-service", "ml", "tests", "scripts"]
-mypy_path = ["apps/api", "apps/orders-service"]
+files = [
+    "libs",
+    "apps/api",
+    "apps/orders-service",
+    "services/anomaly-detector",
+    "services/incident-correlator",
+    "ml",
+    "tests",
+    "scripts",
+]
+mypy_path = [
+    "libs",
+    "apps/api",
+    "apps/orders-service",
+    "services/anomaly-detector",
+    "services/incident-correlator",
+]
+exclude = ["services/incident-correlator/migrations/"]
 
 [[tool.mypy.overrides]]
 # These ship incomplete or no type information.
@@ -100,5 +149,7 @@ module = [
     "scipy.*",
     "matplotlib.*",
     "joblib.*",
+    "asyncpg.*",
+    "alembic.*",
 ]
 ignore_missing_imports = true

@@ -17,7 +17,9 @@ PY := $(BIN)/python
         compose-up compose-down compose-logs \
         docker-build docker-build-orders \
         ml-test data-prepare nab-download ml-experiments ml-experiment ml-infer-demo \
-        ml-docker-build
+        ml-docker-build \
+        db-migrate db-revision run-correlator run-detector incident-scenario \
+        docker-build-correlator docker-build-detector
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -25,15 +27,18 @@ help: ## Show this help
 venv: ## Create the virtual environment
 	python -m venv $(VENV)
 
-install: ## Install runtime + dev + ml dependencies (editable)
+install: ## Install runtime + dev + ml + incident dependencies (editable)
 	$(PY) -m pip install --upgrade pip
-	$(PY) -m pip install -e ".[dev,ml]"
+	$(PY) -m pip install -e ".[dev,ml,incident,detector]"
 
-test: ## Run unit tests (no broker needed)
+test: ## Run unit tests (no broker / DB needed)
 	$(PY) -m pytest
 
-test-integration: ## Run integration tests (needs `make compose-up` first)
-	KAFKA_BOOTSTRAP_SERVERS=localhost:29092 $(PY) -m pytest -m integration
+test-integration: ## Run integration tests (needs `make compose-up` + `make db-migrate`)
+	KAFKA_BOOTSTRAP_SERVERS=localhost:29092 \
+	DB_URL=postgresql+asyncpg://sentinelops:sentinelops@localhost:5432/sentinelops \
+	DB_TEST_URL=postgresql+asyncpg://sentinelops:sentinelops@localhost:5432/sentinelops \
+	$(PY) -m pytest -m integration
 
 lint: ## Lint with Ruff
 	$(PY) -m ruff check .
@@ -72,6 +77,33 @@ docker-build: ## Build the platform API image
 
 docker-build-orders: ## Build the orders-service image
 	docker build -f apps/orders-service/Dockerfile -t sentinelops-ai:orders-service .
+
+docker-build-correlator: ## Build the incident-correlator image
+	docker build -f services/incident-correlator/Dockerfile -t sentinelops-ai:incident-correlator .
+
+docker-build-detector: ## Build the anomaly-detector image
+	docker build -f services/anomaly-detector/Dockerfile -t sentinelops-ai:anomaly-detector .
+
+# --- Phase 3: incident correlation -------------------------------------
+DB_URL ?= postgresql+asyncpg://sentinelops:sentinelops@localhost:5432/sentinelops
+
+db-migrate: ## Apply incident-correlator DB migrations (needs Postgres up)
+	cd services/incident-correlator && DB_URL=$(DB_URL) $(abspath $(BIN))/alembic upgrade head
+
+db-revision: ## Autogenerate a migration: MSG="add x column"
+	cd services/incident-correlator && DB_URL=$(DB_URL) $(abspath $(BIN))/alembic revision --autogenerate -m "$(MSG)"
+
+run-correlator: ## Run incident-correlator locally (:8002) against localhost
+	KAFKA_BOOTSTRAP_SERVERS=localhost:29092 DB_URL=$(DB_URL) APP_PORT=8002 \
+	$(PY) -m incident_correlator
+
+run-detector: ## Run anomaly-detector locally (:8003) against localhost
+	KAFKA_BOOTSTRAP_SERVERS=localhost:29092 APP_PORT=8003 \
+	DETECTOR_TARGET_METRICS_URL=http://localhost:8001/metrics \
+	$(PY) -m anomaly_detector
+
+incident-scenario: ## Deterministic end-to-end demo: telemetry -> anomalies -> ONE incident
+	$(PY) scripts/incident_scenario.py
 
 # --- Phase 2: ML anomaly detection ---------------------------------------
 ml-test: ## Run only the ML test suite

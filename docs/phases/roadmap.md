@@ -46,10 +46,26 @@ boundary. Details: [../architecture/phase-2.md](../architecture/phase-2.md);
 no test-set leakage; the held-out-fault and NAB experiments run; no Phase 3+
 functionality present.
 
-## Phase 3 — Incident correlation + persistence — planned
+## Phase 3 — Incident correlation + persistence — done
 
-Service that correlates anomaly events into incidents; PostgreSQL schema and
-migrations; Redis for correlation windows if justified.
+`anomaly-detector` wraps the Phase 2 model in a live scrape/score/publish loop
+(`orders-service` `/metrics` → `anomaly.detected`). `incident-correlator`
+consumes those events and correlates them into **incidents** with
+**deterministic, explainable** rules (correlation key `service:environment` +
+configurable window — no LLM), assigns severity by a rule engine, and persists
+incidents + evidence + append-only state history in **PostgreSQL** (SQLAlchemy +
+Alembic). One active incident per key is a partial unique index; the Kafka
+consumer is idempotent (at-least-once, DLQ for poison messages). An internal
+Incident API serves queries + manual lifecycle transitions; `incident.*` events
+are published for Phase 4. Shared plumbing moved to `libs/sentinelops_common/`.
+`docs/architecture/phase-3.md`, `docs/architecture/incident-model.md`,
+[ADR-014](../decisions/adr-014-postgresql-for-incident-state.md)–[ADR-018](../decisions/adr-018-kafka-partitioning-strategy.md).
+
+**Exit criteria:** `docker compose up` brings up Kafka + Postgres + the two
+services + migrations; a telemetry sequence with injected faults produces one
+correlated incident queryable via the API; unit + `-m integration` (Kafka +
+Postgres) + all Phase 0/1/2 tests pass; no LLM in correlation or severity; no
+Phase 4 functionality present.
 
 ## Phase 4 — AI RCA agent with controlled tools — planned
 

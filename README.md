@@ -1,6 +1,6 @@
 # SentinelOps AI
 
-> **Current status: Phase 2 — ML anomaly detection + offline evaluation.**
+> **Current status: Phase 3 — Incident correlation + persistence.**
 > Only the items under [Current status](#current-status) are implemented.
 > Everything under [Planned architecture](#planned-architecture) and
 > [Technology roadmap](#technology-roadmap) is future work and is labelled as such.
@@ -51,9 +51,10 @@ An LLM API call is *not* the ML component. See
 
 ## Planned architecture
 
-> Target design. As of Phase 1, only the first instrumented service
-> (`orders-service`) and the Kafka backbone exist — everything else below is
-> future work. See [Current status](#current-status).
+> Target design. As of Phase 3, the Kafka backbone, `orders-service`, live
+> anomaly detection, and incident correlation + persistence (PostgreSQL) exist;
+> the AI RCA agent and everything downstream is future work. See
+> [Current status](#current-status).
 
 ```mermaid
 flowchart LR
@@ -113,7 +114,7 @@ Introduced **only in the phase that needs it**, never earlier:
 | **0** | Repository & development foundation | **done** |
 | **1** | Event backbone (Kafka) + a first instrumented service emitting telemetry | **done** |
 | **2** | ML anomaly-detection pipeline + offline evaluation (real metrics) | **done** |
-| 3 | Incident correlation + persistence | planned |
+| **3** | Incident correlation + persistence (deterministic rules, PostgreSQL, Incident API) | **done** |
 | 4 | AI RCA agent with controlled evidence tools | planned |
 | 5 | Human-approved, allow-listed remediation + recovery verification + audit | planned |
 | 6 | MLOps lifecycle: MLflow, model monitoring, drift detection, retraining | planned |
@@ -126,39 +127,39 @@ ones. See [docs/phases/roadmap.md](docs/phases/roadmap.md).
 ## Development
 
 > Every command below works today. Prerequisites: Python 3.12+ (dev machine
-> uses 3.14), Git, Docker Desktop (for Phase 1's Kafka).
+> uses 3.14), Git, Docker Desktop (Kafka + PostgreSQL).
 
 ```bash
-# 1. Virtual environment + dependencies (dev tools + ML libs)
+# 1. Virtual environment + dependencies
 python -m venv .venv
 source .venv/Scripts/activate      # Windows Git Bash;  .venv/bin/activate on Unix
-pip install -e ".[dev,ml]"
+pip install -e ".[dev,ml,incident,detector]"
 cp .env.example .env
 
-# 2. The Phase 1 event pipeline (Kafka + orders-service + demo consumer)
+# 2. The full pipeline (Phases 1 + 3): Kafka, PostgreSQL, orders-service,
+#    anomaly-detector, incident-correlator (+ one-shot DB migration)
 docker compose up --build -d
-curl -X POST http://localhost:8001/orders \
-  -H 'content-type: application/json' \
-  -d '{"customer_id":"customer-1","amount":1499.00,"currency":"INR"}'
+python scripts/generate_traffic.py --scenario sequence --duration 40 --rate 6
+curl -s http://localhost:8002/incidents | python -m json.tool   # the correlated incident
 
-# 3. Phase 2 ML: reproduce every experiment on the committed datasets
+# 3. Deterministic incident-correlation demo — no Kafka, no DB
+make incident-scenario
+
+# 4. Phase 2 ML: reproduce every experiment on the committed datasets
 make ml-experiments                # -> artifacts/reports/ + summary.md
-python -m ml.inference \
-  artifacts/models/exp2_isolation_forest_sentinelops__isolation_forest.joblib \
-  ml/data/processed/sentinelops/run_a/windows.csv
 ```
 
-With `make` (Git Bash): `make install`, `make compose-up`, `make run-orders`,
-`make ml-experiments`, `make check`. Full instructions incl. PowerShell in
-[docs/development/setup.md](docs/development/setup.md).
+With `make` (Git Bash): `make install`, `make compose-up`, `make db-migrate`,
+`make run-correlator`, `make ml-experiments`, `make check`. Full instructions
+incl. PowerShell in [docs/development/setup.md](docs/development/setup.md).
 
 ## Testing
 
 ```bash
 pytest                                                    # all unit tests — or: make test
 make ml-test                                               # just the ML suite
-docker compose up -d kafka && \
-  KAFKA_BOOTSTRAP_SERVERS=localhost:29092 pytest -m integration   # or: make test-integration
+docker compose up -d kafka postgres && make db-migrate && \
+  make test-integration                                   # Kafka + PostgreSQL integration tests
 ```
 
 Tests live in [tests/](tests/): the platform API smoke tests,
@@ -250,8 +251,38 @@ The `ml/` subsystem — an offline pipeline, not yet wired into the live path.
 
 Details + all measured numbers: [docs/architecture/phase-2.md](docs/architecture/phase-2.md).
 
-**Not implemented** (later phases): a running service that scores live telemetry
-and emits anomaly events onto Kafka; incident correlation; the AI RCA agent /
-LangGraph / LLM calls; remediation and human-approval workflow; MLflow / model
-registry; XGBoost / deep models; a deployed observability stack; Kubernetes;
-AWS; Terraform; authentication.
+### Phase 3 — Incident correlation + persistence *(done)*
+
+- **`libs/sentinelops_common/`** — shared plumbing extracted from `orders_service`:
+  the Kafka event envelope + versioned payload contracts, JSON logging + OpenTelemetry
+  setup, a JSON producer, and an idempotent consumer.
+- **`anomaly-detector`** (`services/anomaly-detector`) — the Phase 2 → 3 handoff.
+  Scrapes `orders-service` `/metrics` every 10 s, rebuilds each telemetry window
+  with the Phase 2 code, scores it with the Isolation Forest model (trained once
+  at startup from committed data, fixed seed), and publishes `anomaly.detected`.
+- **`incident-correlator`** (`services/incident-correlator`) — consumes
+  `anomaly.detected` and groups related anomalies for a service into one
+  **incident** with **deterministic, explainable** rules: a correlation key
+  (`service:environment`) plus a configurable time window — **no LLM**
+  ([ADR-015](docs/decisions/adr-015-deterministic-anomaly-correlation.md)).
+  Severity is a deterministic rule engine (INFO…CRITICAL), every firing rule
+  recorded.
+- **PostgreSQL** (SQLAlchemy 2.0 async + Alembic —
+  [ADR-014](docs/decisions/adr-014-postgresql-for-incident-state.md)) — incidents,
+  evidence, and an append-only state-transition history. A partial unique index
+  enforces one active incident per key; `event_id` uniqueness makes replays
+  idempotent. Offset committed only after the DB transaction
+  ([ADR-016](docs/decisions/adr-016-idempotent-kafka-consumer.md)); poison
+  messages go to `anomaly.events.dlq`.
+- **Incident API** (`:8002`, internal) — list/detail/evidence/history with
+  filters, plus acknowledge / resolve / transition against an explicit state
+  machine ([ADR-017](docs/decisions/adr-017-incident-state-machine.md)).
+  `incident.*` lifecycle events are published for Phase 4.
+
+Details: [docs/architecture/phase-3.md](docs/architecture/phase-3.md) ·
+[docs/architecture/incident-model.md](docs/architecture/incident-model.md).
+
+**Not implemented** (later phases): the AI RCA agent / LangGraph / LLM calls;
+remediation and human-approval workflow; MLflow / model registry; XGBoost / deep
+models; a deployed observability stack; Kubernetes; AWS; Terraform;
+authentication; cross-service / topology-aware correlation.

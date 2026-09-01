@@ -1,6 +1,6 @@
 # Development Setup
 
-Every command here works today (through Phase 2). Windows (PowerShell and Git
+Every command here works today (through Phase 3). Windows (PowerShell and Git
 Bash) and Unix instructions are given.
 
 ## Prerequisites
@@ -9,7 +9,7 @@ Bash) and Unix instructions are given.
 | --- | --- | --- |
 | Python | 3.12+ (dev machine: 3.14.5) | `requires-python = ">=3.12"` |
 | Git | any recent | — |
-| Docker Desktop | required for Phase 1 | Kafka + services run in Compose |
+| Docker Desktop | required for Phase 1+ | Kafka, PostgreSQL, and services run in Compose |
 | `make` | optional | bundled with Git for Windows; used for shortcuts |
 
 ## 1. Clone
@@ -40,12 +40,13 @@ python -m venv .venv
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev,ml]"
+python -m pip install -e ".[dev,ml,incident,detector]"
 ```
 
 `-e` (editable) means source changes take effect without reinstalling. `[dev]`
 adds pytest, httpx, Ruff, and mypy; `[ml]` adds pandas, NumPy, scikit-learn,
-SciPy, matplotlib, and joblib (Phase 2). Drop `,ml` if you only need Phase 0/1.
+SciPy, matplotlib, and joblib (Phase 2); `[incident]` adds SQLAlchemy, asyncpg,
+and Alembic and `[detector]` adds httpx (Phase 3). Drop extras you don't need.
 
 ## 4. Environment configuration
 
@@ -115,11 +116,12 @@ Tear down: `docker compose down` (add `-v` to drop volumes).
 pytest                     # unit tests (no broker needed) — or: make test
 ```
 
-Integration test (needs a broker):
+Integration tests (need a broker; the Phase 3 ones also need PostgreSQL):
 
 ```bash
-docker compose up -d kafka
-KAFKA_BOOTSTRAP_SERVERS=localhost:29092 pytest -m integration    # or: make test-integration
+docker compose up -d kafka postgres
+make db-migrate                    # alembic upgrade head against localhost:5432
+make test-integration              # sets KAFKA_BOOTSTRAP_SERVERS + DB_URL + DB_TEST_URL
 ```
 
 ## 8. Phase 2: ML anomaly detection
@@ -151,7 +153,38 @@ python -m ml.collection.collector --run-id run_b --plan holdout
 make data-prepare                                   # -> ml/data/processed/sentinelops/
 ```
 
-## 9. Lint, format, type-check
+## 9. Phase 3: incident correlation
+
+```bash
+# Everything (Phases 1 + 3):
+docker compose up --build
+#   orders-service :8001 · incident-correlator :8002 · anomaly-detector :8003 · postgres :5432
+
+# Watch an incident form from injected faults:
+python scripts/generate_traffic.py --scenario sequence --duration 40 --rate 6
+curl -s http://localhost:8002/incidents | python -m json.tool
+curl -s "http://localhost:8002/incidents/<id>/evidence" | python -m json.tool
+curl -s "http://localhost:8002/incidents/<id>/history"  | python -m json.tool
+curl -X POST "http://localhost:8002/incidents/<id>/acknowledge"
+
+# Deterministic in-process demo — no Kafka, no DB:
+make incident-scenario
+```
+
+Run the services on the host instead:
+
+```bash
+docker compose up -d kafka postgres
+make db-migrate
+make run-correlator &      # :8002
+make run-detector &        # :8003  (scrapes host orders-service :8001)
+```
+
+Schema changes: edit
+`services/incident-correlator/incident_correlator/db/models.py`, then
+`make db-revision MSG="..."`, review the generated file, `make db-migrate`.
+
+## 10. Lint, format, type-check
 
 ```bash
 ruff check .            # lint
@@ -160,7 +193,7 @@ ruff format --check .   # verify formatting (used in CI)
 mypy                    # strict type-check (config in pyproject.toml)
 ```
 
-## 10. Make shortcuts (Git Bash)
+## 11. Make shortcuts (Git Bash)
 
 Run `make help` for the full list. Common ones:
 
@@ -171,26 +204,29 @@ Run `make help` for the full list. Common ones:
 | `make test` / `make test-integration` / `make ml-test` | unit tests / integration tests / ML tests |
 | `make lint` / `make format` / `make typecheck` | Ruff / Ruff / mypy |
 | `make check` | lint + typecheck + test (the full gate) |
-| `make compose-up` / `make compose-down` / `make compose-logs` | Phase 1 environment |
+| `make compose-up` / `make compose-down` / `make compose-logs` | Compose environment |
 | `make traffic SCENARIO=latency` | run the traffic generator |
+| `make db-migrate` / `make run-correlator` / `make run-detector` / `make incident-scenario` | Phase 3 |
 | `make ml-experiments` / `make ml-experiment NAME=...` | run Phase 2 experiments |
 | `make nab-download` / `make data-prepare` | Track B data / rebuild processed datasets |
 
 On PowerShell, use the explicit commands instead of `make`.
 
-## 11. Docker
+## 12. Docker
 
 ```bash
 docker build -t sentinelops-ai:api .                                   # platform API
 docker build -f apps/orders-service/Dockerfile -t sentinelops-ai:orders-service .
 docker build -f ml/Dockerfile -t sentinelops-ai:ml .                   # ML experiment runner
-docker compose up --build                                              # full Phase 1 env
+docker build -f services/incident-correlator/Dockerfile -t sentinelops-ai:incident-correlator .
+docker build -f services/anomaly-detector/Dockerfile -t sentinelops-ai:anomaly-detector .
+docker compose up --build                                              # full env (Phases 1 + 3)
 
 # run the ML experiments in the container, writing to the host artifacts/ dir
 docker run --rm -v "$PWD/artifacts:/app/artifacts" sentinelops-ai:ml run all
 ```
 
-## 12. Git workflow
+## 13. Git workflow
 
 - `main` is protected; work on branches: `git switch -c phase-<n>/<short-topic>`.
 - Keep commits small and scoped; run `make check` before pushing.

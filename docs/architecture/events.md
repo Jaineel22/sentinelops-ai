@@ -7,7 +7,9 @@ How domain facts travel through SentinelOps' Kafka backbone. This is the
 ## Envelope
 
 Every event is a JSON object with the same envelope. Implemented in
-`apps/orders-service/orders_service/events.py` (`EventEnvelope`).
+`libs/sentinelops_common/events.py` (`EventEnvelope`); `orders_service.events`
+re-exports it. Payload contracts for cross-service events live in
+`libs/sentinelops_common/contracts.py`.
 
 ```json
 {
@@ -40,10 +42,10 @@ Every event is a JSON object with the same envelope. Implemented in
 
 | Message part | Value |
 | --- | --- |
-| Topic | `orders.events` (configurable: `KAFKA_ORDERS_TOPIC`) |
-| Key | `order_id` — so all events for one order share a partition and keep order |
+| Topic | `<aggregate>.events` — `orders.events`, `anomaly.events`, `incident.events` |
+| Key | a stable correlation id — `order_id`, `service`, `correlation_key` — so related events share a partition and keep order |
 | Value | the envelope, UTF-8 JSON |
-| Headers | `traceparent` (W3C), `tracestate` (if any), `event-type`, `event-id` |
+| Headers | `traceparent` (W3C), `tracestate` (if any), `event-type`, `event-id`, `event-version` |
 
 ## Topic: `orders.events`
 
@@ -58,22 +60,49 @@ Every event is a JSON object with the same envelope. Implemented in
 - **Retention:** broker default for now. A deliberate retention policy is a
   later-phase decision (it affects replayability for ML/backfill).
 
+## Topic: `anomaly.events` (Phase 3)
+
+- **Payload:** `AnomalyDetectedV1` (`event_type = "anomaly.detected"`, v1) —
+  detector + version, service, environment, window bounds, score/threshold,
+  `is_anomaly`, the 11 operational `signals`, and coarse `abnormal_signals`
+  triage flags.
+- **Key:** `service` — all anomalies for one service share a partition and stay
+  ordered ([ADR-018](../decisions/adr-018-kafka-partitioning-strategy.md)).
+- **DLQ:** `anomaly.events.dlq` — malformed payloads, unknown versions,
+  non-anomaly events, and retry-exhausted failures land here with a
+  `dlq-reason` header ([ADR-016](../decisions/adr-016-idempotent-kafka-consumer.md)).
+- **Creation:** `anomaly-detector` / `incident-correlator` create it on startup
+  if missing (`KAFKA_AUTO_CREATE_TOPICS=true`).
+
+## Topic: `incident.events` (Phase 3)
+
+- **Payload:** `IncidentLifecycleV1` (`incident.opened` / `incident.updated` /
+  `incident.resolved`, v1) — a **best-effort** notification that an incident
+  changed. The Incident API / PostgreSQL is authoritative; this stream is a
+  wake-up for Phase 4.
+- **Key:** `correlation_key` (`service:environment`).
+- Published **after** the database transaction commits; a lost lifecycle event
+  never corrupts state.
+
 ## Producers
 
 | Producer | Events | Trigger |
 | --- | --- | --- |
 | `orders-service` | `order.created` v1 | `POST /orders` |
+| `anomaly-detector` | `anomaly.detected` v1 | telemetry window scored as anomalous |
+| `incident-correlator` | `incident.opened` / `incident.updated` / `incident.resolved` v1 | incident created / grew / resolved |
 
-Publishing is synchronous and fail-closed in Phase 1
-([ADR-010](../decisions/adr-010-phase1-synchronous-publish.md)).
+Order publishing is synchronous and fail-closed in Phase 1
+([ADR-010](../decisions/adr-010-phase1-synchronous-publish.md)). `incident.*`
+publishing is best-effort, after the DB commit (ADR-016).
 
 ## Consumers
 
 | Consumer | Status | Purpose |
 | --- | --- | --- |
 | `orders-service` demo consumer | **implemented** | Proves producer → Kafka → consumer; logs receipt with continued trace. Not a real processor. |
-| Incident correlation | planned (Phase 3) | Group domain facts / anomalies into incidents. |
-| ML feature capture | planned (Phase 2) | *Reads telemetry, not this stream* — but may use event counts as context. |
+| `incident-correlator` | **implemented** (Phase 3) | Consumes `anomaly.events`; correlates anomalies into incidents. Idempotent, at-least-once, offset committed only after the DB transaction. |
+| ML feature capture | not planned as a stream consumer | *Reads telemetry, not this stream.* |
 | Audit | planned (Phase 5) | Durable record. |
 
 ## Delivery semantics & idempotency
