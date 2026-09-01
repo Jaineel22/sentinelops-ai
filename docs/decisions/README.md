@@ -18,6 +18,9 @@ supersedes the old one and update the status line.
 | [008](adr-008-events-vs-telemetry.md) | Business events (Kafka) are separate from observability telemetry (OTel) | Accepted |
 | [009](adr-009-controlled-failure-injection.md) | Controlled, development-only failure injection | Accepted |
 | [010](adr-010-phase1-synchronous-publish.md) | Phase 1 order publishing is synchronous and fail-closed | Accepted |
+| [011](adr-011-ml-dataset-via-metrics-scraping.md) | Build the Track A ML dataset by scraping `/metrics` | Accepted |
+| [012](adr-012-isolation-forest-primary-detector.md) | Isolation Forest is the primary anomaly detector | Accepted |
+| [013](adr-013-nab-benchmark-track.md) | NAB as the independent benchmark track | Accepted |
 
 ## Template
 

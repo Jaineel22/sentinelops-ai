@@ -51,18 +51,22 @@ independently deployable. Rationale:
 [ADR-006](../decisions/adr-006-kafka-local-deployment-and-client.md),
 [ADR-008](../decisions/adr-008-events-vs-telemetry.md).
 
-### 3. ML anomaly detection — PLANNED
+### 3. ML anomaly detection — PARTIALLY IMPLEMENTED (Phase 2)
 
-A service consumes telemetry features and scores them with trained models
-(scikit-learn / XGBoost; PyTorch only if justified). It emits anomaly events.
-The **live** pipeline is trained and evaluated on telemetry whose feature space
-matches the live system. Public benchmark datasets (HDFS, BGL, NAB) are used for
-**separate** offline experimentation and are never claimed to detect unrelated
-live metrics: [ADR-004](../decisions/adr-004-datasets-vs-live-telemetry.md).
+The **offline pipeline** exists in `ml/`: a leak-safe dataset built from
+`orders-service` telemetry, a 23-feature engineering layer shared by training
+and inference, a robust z-score baseline and an **Isolation Forest** (primary,
+scikit-learn — [ADR-012](../decisions/adr-012-isolation-forest-primary-detector.md)),
+chronological + held-out-fault evaluation with real metrics (precision, recall,
+F1, PR-AUC, FPR, detection delay — never fabricated), and a **separate** NAB
+benchmark track ([ADR-004](../decisions/adr-004-datasets-vs-live-telemetry.md),
+[ADR-013](../decisions/adr-013-nab-benchmark-track.md)). Reports live in
+`artifacts/reports/`.
 
-Evaluation uses real measurements — precision, recall, F1, PR-AUC where
-appropriate, false-positive rate, detection latency. Numbers are never
-fabricated.
+`ml.inference.DetectorService` gives Phase 3 a clean call: `score_window(signals)
+→ AnomalyResult`. **Not yet built:** a running service that consumes live
+telemetry and emits anomaly events onto Kafka (that wiring is Phase 3+). XGBoost
+and PyTorch remain deferred. See [phase-2.md](phase-2.md).
 
 ### 4. Incident correlation — PLANNED
 
@@ -124,7 +128,7 @@ retraining workflow. Training/evaluation is reproducible.
 | --- | --- |
 | Repo & dev foundation | 0 (done) |
 | Kafka + first instrumented service | 1 (done) |
-| ML anomaly detection + offline evaluation | 2 |
+| ML anomaly detection + offline evaluation | 2 (done, offline) |
 | Incident correlation + PostgreSQL | 3 |
 | AI RCA agent + evidence tools | 4 |
 | Approval + remediation + verification + audit | 5 |
@@ -138,11 +142,12 @@ retraining workflow. Training/evaluation is reproducible.
 | --- | --- |
 | `apps/api/` | The SentinelOps platform API (Phase 0). |
 | `apps/orders-service/` | Demo app under observation (Phase 1). |
-| `services/` | SentinelOps-internal event processors — correlation, ML consumers (Phase 2+). |
-| `ml/` | ML lifecycle code: data, features, training, evaluation, inference (Phase 2+). |
+| `services/` | SentinelOps-internal event processors — correlation, ML consumers (Phase 3+). |
+| `ml/` | ML anomaly-detection subsystem: collection, data, features, models, evaluation, experiments, inference (Phase 2). |
+| `artifacts/` | `reports/` (committed experiment results), `models/` (git-ignored). |
 | `scripts/` | Developer utilities (e.g. `generate_traffic.py`). |
 | `infrastructure/` | `docker/`, `kubernetes/`, `terraform/` (Phase 7-8). |
-| `tests/` | Tests, one subpackage per app/service (`tests/orders_service/`). |
+| `tests/` | Tests, one subpackage per component (`tests/orders_service/`, `tests/ml/`). |
 | `docs/` | `architecture/`, `decisions/` (ADRs), `development/`, `phases/`. |
 
 `apps` vs `services` vs `ml` is kept because the three have genuinely different
