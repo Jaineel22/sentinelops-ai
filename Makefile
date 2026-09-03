@@ -21,7 +21,9 @@ PY := $(BIN)/python
         db-migrate db-revision run-correlator run-detector incident-scenario \
         docker-build-correlator docker-build-detector \
         db-migrate-rca run-rca rca-scenario rca-e2e-scenario docker-build-rca \
-        db-migrate-remediation run-remediation remediation-e2e-scenario docker-build-remediation
+        db-migrate-remediation run-remediation remediation-e2e-scenario docker-build-remediation \
+        mlops-retrain mlops-retrain-promote mlops-retrain-demo mlops-drift-retrain \
+        docker-build-mlflow phase6-demo phase6-summary
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -163,3 +165,34 @@ ml-infer-demo: ## Score a processed run through the saved Isolation Forest
 
 ml-docker-build: ## Build the ML pipeline image
 	docker build -f ml/Dockerfile -t sentinelops-ai:ml .
+
+# --- Phase 6: MLOps lifecycle ------------------------------------------
+# These need a reachable MLflow tracking store. Offline default: a local sqlite
+# store; or export MLFLOW_TRACKING_URI=http://localhost:5000 for the compose server.
+MLFLOW_TRACKING_URI ?= sqlite:///mlruns/mlflow.db
+
+docker-build-mlflow: ## Build the MLflow tracking-server image
+	docker build -f docker/mlflow/Dockerfile -t sentinelops-ai:mlflow .
+
+mlops-retrain: ## Retrain isolation_forest on run_a (seed 42), run the gate, do NOT promote
+	MLFLOW_TRACKING_URI=$(MLFLOW_TRACKING_URI) $(PY) -m ml.mlops retrain --dataset run_a --seed 42
+
+mlops-retrain-promote: ## Retrain on run_a and auto-promote to champion if the gate passes
+	MLFLOW_TRACKING_URI=$(MLFLOW_TRACKING_URI) \
+	  $(PY) -m ml.mlops retrain --dataset run_a --seed 42 --promote-if-passing
+
+mlops-retrain-demo: ## Phase 6E demo: retrain -> track -> register -> gate
+	MLFLOW_TRACKING_URI=$(MLFLOW_TRACKING_URI) $(PY) scripts/retraining_demo.py
+
+mlops-drift-retrain: ## Phase 6E demo: drift detected -> retrain -> gate -> promote/reject
+	MLFLOW_TRACKING_URI=$(MLFLOW_TRACKING_URI) $(PY) scripts/drift_triggered_retraining.py
+
+phase6-demo: ## Phase 6 end-to-end: train champion -> register -> drift -> retrain -> gate -> promote
+	$(PY) scripts/phase6_e2e_demo.py
+
+phase6-summary: ## Print the Phase 6 completion summary
+	@echo "=== Phase 6 - MLOps lifecycle (complete) ==="
+	@echo "6A tracking . 6B registry+aliases . 6C inference . 6D drift . 6E retraining . 6F docs+e2e"
+	@echo "ADRs: 031 (tracking+registry) . 032 (aliases) . 033 (promotion gate) . 034 (PSI drift)"
+	@echo "docs: docs/architecture/phase-6.md . docs/phase6-summary.md"
+	@echo "run 'make phase6-demo' (sqlite, no server) for end-to-end validation"
