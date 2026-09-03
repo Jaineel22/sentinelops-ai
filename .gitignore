@@ -34,6 +34,10 @@ mlruns/
 mlartifacts/
 *.joblib
 *.pkl
+# Local MLflow / SQLite state (Phase 6)
+*.db
+*.db-journal
+*.db-wal
 data/raw/
 data/interim/
 data/processed/

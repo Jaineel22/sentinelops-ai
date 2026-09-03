@@ -27,6 +27,9 @@
 # For a live run: set RCA_MODE=live, LLM_PROVIDER=anthropic and LLM_API_KEY in your
 # shell (compose reads it from the environment; it is never committed here).
 #
+#   - mlflow-init         one-shot: create the `mlflow` database on Postgres if missing
+#   - mlflow              MLflow tracking + model-registry server (Phase 6) — http://localhost:5000
+#
 # Dev-only Postgres credentials live in this file; never reuse them anywhere real.
 # No Redis / Prometheus / Grafana / Loki / Tempo yet — later phases.
 
@@ -266,6 +269,15 @@ services:
       DETECTOR_POLL_INTERVAL_SECONDS: "10"
       DETECTOR_MODEL_PATH: /app/artifacts/models/detector_stream.joblib
       OTEL_SERVICE_NAME: anomaly-detector
+      # Phase 6C: empty by default -> loads the local bundle exactly as before.
+      # Set MLFLOW_TRACKING_URI=http://mlflow:5000 (in your shell / .env) to
+      # resolve the `champion` model version from the registry instead; with
+      # MLFLOW_REQUIRED=false an unreachable registry falls back to local
+      # (logged), with =true the detector's /ready reports 503.
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-}
+      MLFLOW_REGISTERED_MODEL_NAME: ${MLFLOW_REGISTERED_MODEL_NAME:-sentinelops-anomaly-detector}
+      MLFLOW_MODEL_ALIAS: ${MLFLOW_MODEL_ALIAS:-champion}
+      MLFLOW_REQUIRED: ${MLFLOW_REQUIRED:-false}
     depends_on:
       kafka:
         condition: service_healthy
@@ -273,5 +285,65 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # --- Phase 6: MLflow (experiment tracking + model registry) ----------------
+  # Backend store: a dedicated `mlflow` database on the existing Postgres.
+  # Artifact store: the `mlflow-artifacts` volume, served over HTTP by the
+  # tracking server (`--serve-artifacts`) so clients never need a shared mount.
+  # UI + API: http://localhost:5000. Nothing in Phases 1-5 depends on this
+  # service; the anomaly-detector keeps starting if MLflow is down (Phase 6C).
+  mlflow-init:
+    image: postgres:17-alpine
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        until pg_isready -h postgres -U sentinelops; do sleep 1; done;
+        psql -h postgres -U sentinelops -tc "SELECT 1 FROM pg_database WHERE datname='mlflow'" | grep -q 1
+        || psql -h postgres -U sentinelops -c "CREATE DATABASE mlflow";
+        echo "mlflow database ready"
+    environment:
+      PGPASSWORD: sentinelops # dev only — matches the postgres service
+    healthcheck:
+      disable: true # one-shot job, exits 0 once the mlflow database exists
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/mlflow/Dockerfile
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --backend-store-uri=postgresql://sentinelops:sentinelops@postgres:5432/mlflow
+      - --serve-artifacts
+      - --artifacts-destination=/mlflow/artifacts
+      - --workers=2
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health').getcode()==200 else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   postgres-data:
+  mlflow-artifacts:

@@ -77,6 +77,15 @@ remediation = [
     "asyncpg>=0.29",
     "alembic>=1.13",
 ]
+# MLOps lifecycle (Phase 6): MLflow experiment tracking + model registry. Only
+# the *client* is needed here (`mlflow-skinny`) — it logs runs to a tracking URI
+# (sqlite / file for tests, an HTTP server in Compose) and drives the registry.
+# The full `mlflow` server (and its PostgreSQL driver) runs in its own container
+# (docker/mlflow/Dockerfile); `mlflow-skinny` deliberately keeps pandas/numpy at
+# the versions Phase 2 was trained and evaluated on.
+mlops = [
+    "mlflow-skinny>=2.19.0,<2.23.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -117,10 +126,16 @@ pythonpath = [
 asyncio_mode = "auto"
 markers = [
     "integration: tests that need a running Kafka broker and/or PostgreSQL (deselected by default)",
+    "mlflow: Phase 6 tests that exercise a local MLflow backend (run by default; skipped without mlflow)",
 ]
 filterwarnings = [
     # Starlette's TestClient warns that it uses httpx; not actionable for us.
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+    # mlflow-skinny 2.22 ships a `return` in a `finally` block; upstream wart,
+    # surfaces only as a SyntaxWarning on Python 3.14 at import.
+    "ignore:'return' in a 'finally' block:SyntaxWarning",
+    # mlflow-skinny 2.22 internals still use pre-2.12 Pydantic idioms; upstream.
+    "ignore::DeprecationWarning:mlflow",
 ]
 
 [tool.ruff]
