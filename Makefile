@@ -20,7 +20,8 @@ PY := $(BIN)/python
         ml-docker-build \
         db-migrate db-revision run-correlator run-detector incident-scenario \
         docker-build-correlator docker-build-detector \
-        db-migrate-rca run-rca rca-scenario rca-e2e-scenario docker-build-rca
+        db-migrate-rca run-rca rca-scenario rca-e2e-scenario docker-build-rca \
+        db-migrate-remediation run-remediation remediation-e2e-scenario docker-build-remediation
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -28,14 +29,14 @@ help: ## Show this help
 venv: ## Create the virtual environment
 	python -m venv $(VENV)
 
-install: ## Install runtime + dev + ml + incident + rca dependencies (editable)
+install: ## Install runtime + dev + ml + incident + rca + remediation dependencies (editable)
 	$(PY) -m pip install --upgrade pip
-	$(PY) -m pip install -e ".[dev,ml,incident,detector,rca]"
+	$(PY) -m pip install -e ".[dev,ml,incident,detector,rca,remediation]"
 
 test: ## Run unit tests (no broker / DB needed)
 	$(PY) -m pytest
 
-test-integration: ## Run integration tests (needs kafka+postgres up + db-migrate + db-migrate-rca)
+test-integration: ## Run integration tests (needs kafka+postgres + db-migrate{,-rca,-remediation})
 	KAFKA_BOOTSTRAP_SERVERS=localhost:29092 \
 	DB_URL=postgresql+asyncpg://sentinelops:sentinelops@localhost:5432/sentinelops \
 	DB_TEST_URL=postgresql+asyncpg://sentinelops:sentinelops@localhost:5432/sentinelops \
@@ -123,6 +124,19 @@ rca-scenario: ## Deterministic in-process demo: one incident -> investigation ->
 
 rca-e2e-scenario: ## Deterministic full-chain demo: incident.opened (Kafka shape) -> RCA -> API
 	$(PY) scripts/rca_e2e_scenario.py
+
+# --- Phase 5: human-approved remediation ------------------------------
+db-migrate-remediation: ## Apply remediation-controller DB migrations (needs Postgres up)
+	cd services/remediation-controller && DB_URL=$(DB_URL) $(abspath $(BIN))/alembic upgrade head
+
+run-remediation: ## Run remediation-controller locally (:8005) against localhost
+	KAFKA_BOOTSTRAP_SERVERS=localhost:29092 DB_URL=$(DB_URL) APP_PORT=8005 $(PY) -m remediation_controller
+
+remediation-e2e-scenario: ## Deterministic full-chain demo: incident -> RCA -> approve -> execute -> verify -> events
+	$(PY) scripts/remediation_e2e_scenario.py
+
+docker-build-remediation: ## Build the remediation-controller image
+	docker build -f services/remediation-controller/Dockerfile -t sentinelops-ai:remediation-controller .
 
 # --- Phase 2: ML anomaly detection ---------------------------------------
 ml-test: ## Run only the ML test suite

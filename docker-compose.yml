@@ -9,12 +9,19 @@
 #   - anomaly-detector    scores orders-service telemetry -> anomaly.detected (Phase 3)
 #   - incident-correlator anomaly.detected -> incidents (Postgres) + Incident API (Phase 3)
 #   - rca-agent           incident.opened -> bounded RCA investigation + Investigation API (Phase 4)
+#   - remediation-migrate one-shot: `alembic upgrade head` (alembic_version_remediation)
+#   - remediation-controller  RCA recommendation -> policy -> human approval ->
+#                             LocalSimulationExecutor -> audit -> recovery verify
+#                             -> remediation.events lifecycle events (Phase 5C-5G).
+#                             No real infra; publishes to Kafka, consumes nothing.
 #
 # Start everything:            docker compose up --build
 # Just the event pipeline:     docker compose up --build kafka orders-service orders-consumer
 # Just Phase 3:                docker compose up --build kafka postgres orders-service \
 #                                  incident-migrate anomaly-detector incident-correlator
 # Phase 4 too:                 docker compose up --build   (adds rca-migrate + rca-agent)
+# Phase 5 too:                 docker compose up --build   (adds remediation-migrate +
+#                              remediation-controller; publishes remediation.events)
 #
 # rca-agent defaults to RCA_MODE=mock — the whole chain runs with NO LLM API key.
 # For a live run: set RCA_MODE=live, LLM_PROVIDER=anthropic and LLM_API_KEY in your
@@ -201,6 +208,47 @@ services:
       incident-correlator:
         condition: service_started # needs the Incident API reachable during investigations
     restart: unless-stopped
+
+  remediation-migrate:
+    build:
+      context: .
+      dockerfile: services/remediation-controller/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    healthcheck:
+      disable: true # one-shot job, exits 0 when the remediation schema is current
+    environment:
+      DB_URL: postgresql+asyncpg://sentinelops:sentinelops@postgres:5432/sentinelops
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rca-migrate:
+        condition: service_completed_successfully # serialize the three lineages
+    restart: "no"
+
+  remediation-controller:
+    build:
+      context: .
+      dockerfile: services/remediation-controller/Dockerfile
+    ports:
+      - "8005:8000"
+    environment:
+      APP_ENV: development
+      DB_URL: postgresql+asyncpg://sentinelops:sentinelops@postgres:5432/sentinelops
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_REMEDIATION_TOPIC: remediation.events
+      OTEL_SERVICE_NAME: remediation-controller
+      OTEL_TRACES_CONSOLE_EXPORT: "false"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      remediation-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # Phase 5G: publishes remediation.events lifecycle events after each committed
+    # transition (best-effort, ADR-030). It consumes NO topic. The only executor
+    # is LocalSimulationExecutor (Phase 5D) — it touches no real infrastructure.
 
   anomaly-detector:
     build:
