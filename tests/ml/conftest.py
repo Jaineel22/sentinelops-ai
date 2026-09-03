@@ -13,8 +13,52 @@ import numpy as np
 import pandas as pd
 import pytest
 from ml.data.schema import SIGNAL_COLUMNS
+from ml.mlops.config import MLflowSettings
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(scope="session")
+def mlflow_sqlite(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, str]:
+    """A local sqlite-backed MLflow tracking + registry store shared across the
+    Phase 6 MLOps tests (the first use pays the one-time schema migration)."""
+
+    directory = tmp_path_factory.mktemp("mlflow_store")
+    return directory, f"sqlite:///{(directory / 'mlflow.db').as_posix()}"
+
+
+def make_model_version(
+    settings: MLflowSettings,
+    *,
+    f1: float = 0.82,
+    recall: float = 1.0,
+    pr_auc: float = 0.70,
+    precision: float = 0.70,
+) -> tuple[str, str]:
+    """Create an MLflow run (metrics + a stub model bundle artifact) and register
+    it as a new version. Returns ``(version, run_id)``. Requires ``mlflow`` and a
+    working-directory the caller has pointed at a temp store."""
+
+    import mlflow
+    from ml.mlops.registry import register_model
+
+    mlflow.set_tracking_uri(settings.tracking_uri)
+    mlflow.set_experiment(settings.experiment_name)
+    with mlflow.start_run() as run:
+        mlflow.log_metrics(
+            {
+                "pointwise.f1": f1,
+                "pointwise.recall": recall,
+                "pointwise.pr_auc": pr_auc,
+                "pointwise.precision": precision,
+            }
+        )
+        bundle = Path("bundle.joblib")
+        bundle.write_bytes(b"stub-bundle")
+        mlflow.log_artifact(str(bundle), artifact_path="model")
+        run_id = run.info.run_id
+    version = register_model(str(bundle), run_id, settings)
+    return version, run_id
 
 
 def _make_signal_frame(
