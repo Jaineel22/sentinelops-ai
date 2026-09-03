@@ -13,7 +13,9 @@ COPY libs/sentinelops_common ./libs/sentinelops_common
 COPY services/anomaly-detector/anomaly_detector ./services/anomaly-detector/anomaly_detector
 # The committed run_a telemetry is bundled so the detector can train at first start.
 COPY ml ./ml
-RUN pip install --no-cache-dir ".[ml,detector]"
+# `mlops` (mlflow-skinny) lets the detector resolve the `champion` model version
+# from the MLflow registry at startup (Phase 6C); it stays optional at runtime.
+RUN pip install --no-cache-dir ".[ml,detector,mlops]"
 
 RUN useradd --create-home --uid 1000 appuser \
     && mkdir -p /app/artifacts/models \

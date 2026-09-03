@@ -6,6 +6,7 @@ the scrape/score/publish loop (:class:`~anomaly_detector.runner.DetectorRunner`)
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -18,7 +19,7 @@ from anomaly_detector import __version__
 from anomaly_detector.config import Settings, get_settings
 from anomaly_detector.metrics import get_metrics
 from anomaly_detector.runner import DetectorRunner
-from anomaly_detector.training import ensure_detector
+from anomaly_detector.training import ensure_detector, get_detector_source
 from sentinelops_common.kafka import KafkaJsonProducer, ensure_topics
 from sentinelops_common.obs import configure_observability, shutdown_observability
 
@@ -42,7 +43,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        detector = ensure_detector(settings.detector.model_path, seed=settings.detector.seed)
+        # Phase 6C: `ensure_detector` resolves the MLflow `champion` alias when
+        # `settings.detector.mlflow` is populated (MLFLOW_TRACKING_URI set); a
+        # registry failure with MLFLOW_REQUIRED=true propagates and the app does
+        # not start. Otherwise it loads/trains the local bundle as before.
+        detector = ensure_detector(
+            settings.detector.model_path,
+            seed=settings.detector.seed,
+            mlflow_settings=settings.detector.mlflow,
+        )
+        app.state.detector = detector
+        logger.info("detector ready", extra=get_detector_source(detector))
         producer = KafkaJsonProducer(
             settings.kafka.bootstrap_servers, client_id=settings.kafka.client_id
         )
@@ -84,9 +95,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/ready")
     def ready(request: Request) -> Response:
         runner = getattr(request.app.state, "runner", None)
+        detector = getattr(request.app.state, "detector", None)
         ok = runner is not None and runner.healthy and request.app.state.settings is not None
-        body = b'{"status":"ready"}' if ok else b'{"status":"not-ready"}'
-        return Response(body, status_code=200 if ok else 503, media_type="application/json")
+        body = {
+            "status": "ready" if ok else "not-ready",
+            "model_loaded": detector is not None,
+            "model_source": detector.source if detector is not None else "unknown",
+            "model_version": detector.model_version if detector is not None else "unknown",
+            "model_type": detector.model_type if detector is not None else "unknown",
+        }
+        return Response(
+            json.dumps(body).encode(),
+            status_code=200 if ok else 503,
+            media_type="application/json",
+        )
+
+    @app.get("/model-info")
+    def model_info(request: Request) -> Response:
+        detector = getattr(request.app.state, "detector", None)
+        if detector is None:
+            return Response(
+                b'{"model_loaded": false}', status_code=503, media_type="application/json"
+            )
+        info = {
+            "model_loaded": True,
+            **get_detector_source(detector),
+            "source_details": detector.source_details,
+        }
+        return Response(json.dumps(info).encode(), media_type="application/json")
 
     @app.get("/metrics", include_in_schema=False)
     def metrics_endpoint() -> Response:

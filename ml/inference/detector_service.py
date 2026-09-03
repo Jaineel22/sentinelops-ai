@@ -13,13 +13,16 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
 from ml.features.engineering import FeatureConfig
 from ml.inference.featurizer import StreamFeaturizer
 from ml.models.base import AnomalyDetector
+
+if TYPE_CHECKING:
+    from ml.mlops.config import MLflowSettings
 
 
 @dataclass(frozen=True)
@@ -41,15 +44,74 @@ class AnomalyResult:
 
 
 class DetectorService:
-    def __init__(self, detector: AnomalyDetector, *, feature_config: FeatureConfig | None = None):
+    def __init__(
+        self,
+        detector: AnomalyDetector,
+        *,
+        feature_config: FeatureConfig | None = None,
+        model_version: str | None = None,
+        source: str = "local",
+    ):
         self._detector = detector
         self._featurizer = StreamFeaturizer(feature_config)
+        # `model_version` is an explicit override (the MLflow registry version
+        # number when loaded via `from_registry`); otherwise the model's own
+        # metadata version is used. `source` records provenance for `/ready`.
+        self._model_version = model_version
+        self._source = source
+        self._source_details: dict[str, str] = {}
 
     @classmethod
     def load(
-        cls, model_path: str | Path, *, feature_config: FeatureConfig | None = None
+        cls,
+        model_path: str | Path,
+        *,
+        feature_config: FeatureConfig | None = None,
+        model_version: str | None = None,
+        source: str = "local",
     ) -> DetectorService:
-        return cls(AnomalyDetector.load(model_path), feature_config=feature_config)
+        return cls(
+            AnomalyDetector.load(model_path),
+            feature_config=feature_config,
+            model_version=model_version,
+            source=source,
+        )
+
+    @classmethod
+    def from_registry(
+        cls, settings: MLflowSettings, *, feature_config: FeatureConfig | None = None
+    ) -> DetectorService:
+        """Resolve ``settings.model_alias`` in the MLflow registry, download that
+        model version's bundle, and load it with the existing ``AnomalyDetector``
+        loader (no ``mlflow.pyfunc`` / ``mlflow.sklearn`` — the artifact is always
+        a bundle produced by this project's training pipeline).
+
+        Raises if ``mlflow`` is not installed, the registry is unreachable, or the
+        alias is unset. Callers own the fail-safe policy.
+        """
+
+        from mlflow.artifacts import download_artifacts
+
+        from ml.mlops.registry import resolve_alias
+
+        version, run_id, model_uri = resolve_alias(settings)
+        downloaded = Path(download_artifacts(artifact_uri=model_uri))
+        bundle = downloaded if downloaded.is_file() else _first_bundle(downloaded)
+
+        service = cls(
+            AnomalyDetector.load(bundle),
+            feature_config=feature_config,
+            model_version=str(version),
+            source="registry",
+        )
+        service._source_details = {
+            "tracking_uri": settings.tracking_uri,
+            "model_name": settings.registered_model_name,
+            "alias": settings.model_alias,
+            "version": str(version),
+            "run_id": str(run_id),
+        }
+        return service
 
     @property
     def model_type(self) -> str:
@@ -57,7 +119,22 @@ class DetectorService:
 
     @property
     def model_version(self) -> str:
+        if self._model_version is not None:
+            return self._model_version
         return self._detector.metadata.ml_version if self._detector.metadata else "unknown"
+
+    @property
+    def source(self) -> str:
+        """Provenance: ``"local"``, ``"registry"``, or ``"local-fallback"``."""
+        return self._source
+
+    @property
+    def source_details(self) -> dict[str, str]:
+        return dict(self._source_details)
+
+    def _mark_source(self, source: str) -> None:
+        """Re-label provenance (used when a registry load falls back to local)."""
+        self._source = source
 
     def reset_stream(self) -> None:
         self._featurizer.reset()
@@ -100,3 +177,12 @@ class DetectorService:
             model_version=self.model_version,
             features={c: round(float(r[c]), 6) for c in feat_cols},
         )
+
+
+def _first_bundle(directory: Path) -> Path:
+    """The single ``*.joblib`` inside a downloaded model-version artifact tree."""
+
+    bundles = sorted(directory.rglob("*.joblib"))
+    if not bundles:
+        raise FileNotFoundError(f"no .joblib model bundle under {directory}")
+    return bundles[0]

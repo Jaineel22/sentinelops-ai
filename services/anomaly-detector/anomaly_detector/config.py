@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
+from ml.mlops.config import MLflowSettings
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -49,6 +51,21 @@ class DetectorSettings(BaseSettings):
     # (useful for debugging the pipeline).
     publish_only_anomalies: bool = True
 
+    # Phase 6C: when `MLFLOW_TRACKING_URI` is set in the environment, the model is
+    # resolved from the MLflow registry by alias (default `champion`) instead of
+    # `model_path`. Populated by `from_env` — never auto-read (distinct prefix).
+    mlflow: MLflowSettings | None = None
+
+    @classmethod
+    def from_env(cls) -> DetectorSettings:
+        """Build from the environment, attaching `MLflowSettings` only when the
+        registry is opted into via `MLFLOW_TRACKING_URI`."""
+
+        base = cls()
+        if os.environ.get("MLFLOW_TRACKING_URI"):
+            return base.model_copy(update={"mlflow": MLflowSettings()})
+        return base
+
 
 class OTelSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="OTEL_", env_file=".env", extra="ignore")
@@ -63,7 +80,7 @@ class Settings(BaseSettings):
 
     app: AppSettings = Field(default_factory=AppSettings)
     kafka: KafkaSettings = Field(default_factory=KafkaSettings)
-    detector: DetectorSettings = Field(default_factory=DetectorSettings)
+    detector: DetectorSettings = Field(default_factory=DetectorSettings.from_env)
     otel: OTelSettings = Field(default_factory=OTelSettings)
 
 
