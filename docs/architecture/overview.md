@@ -8,7 +8,7 @@ tracks what is actually built. It is updated at the end of every phase.
 - **IMPLEMENTED** — exists in the repository and is tested.
 - **PLANNED** — target design; no code yet.
 
-## Current state (through Phase 4)
+## Current state (through Phase 5)
 
 **IMPLEMENTED**
 
@@ -28,8 +28,16 @@ tracks what is actually built. It is updated at the end of every phase.
   live (`AnthropicLlmClient`) LLM boundary, deterministic `validate_report`, the
   Investigation HTTP API, and Docker Compose integration (`rca-migrate` +
   `rca-agent`). Recommendation-only — no executor.
+- **Phase 5:** `remediation-controller` — the closed action catalogue + structural
+  no-command proposal model (5A), the LLM-free 9-rule policy engine (5B),
+  PostgreSQL persistence + the human approval workflow/API (5C), the allow-listed
+  `LocalSimulationExecutor` + dry-run (5D), the append-only audit trail with a
+  PostgreSQL tamper trigger (5E), the deterministic observe-only recovery
+  verifier (5F), and best-effort `remediation.events` Kafka lifecycle events
+  published after each committed transition (5G). Human approval is mandatory;
+  no real infrastructure is touched.
 
-See the per-phase docs. Sections 6-10 below are **PLANNED**.
+See the per-phase docs. Sections 8-10 below are **PLANNED**.
 
 ## Target architecture
 
@@ -44,10 +52,11 @@ are planned for Phase 7.
 ### 2. Event backbone — PARTIALLY IMPLEMENTED (Phase 1)
 
 **Apache Kafka** is the backbone. A single-node KRaft broker carries
-`orders.events` (Phase 1) and, since Phase 3, `anomaly.events` and
-`incident.events` (plus `anomaly.events.dlq`). Agent findings, approval
-decisions, and remediation/verification outcomes are planned for their
-respective phases. Services are decoupled and independently deployable.
+`orders.events` (Phase 1); since Phase 3, `anomaly.events` and `incident.events`
+(plus `anomaly.events.dlq`); and since Phase 5G, `remediation.events` — a
+versioned `RemediationLifecycleV1` stream the `remediation-controller` publishes
+(keyed by `remediation_id`) after each committed lifecycle transition, and
+consumes nothing (ADR-030). Services are decoupled and independently deployable.
 Rationale:
 [ADR-001](../decisions/adr-001-event-driven-architecture.md),
 [ADR-006](../decisions/adr-006-kafka-local-deployment-and-client.md),
@@ -116,7 +125,7 @@ API (`POST /investigations`, `GET /investigations/{id}` and `/steps`,
 [ADR-002](../decisions/adr-002-ml-and-llm-separation.md) ·
 [ADR-019](../decisions/adr-019-rca-agent-service-and-boundary.md).
 
-### 6. Human-approved remediation — PLANNED
+### 6. Human-approved remediation — IMPLEMENTED (Phase 5, Sub-phases 5A–5G)
 
 ```
 AI recommendation → policy validation → human approval
@@ -125,13 +134,96 @@ AI recommendation → policy validation → human approval
 
 No change to a running system happens without a human decision, and only
 pre-defined allow-listed actions can ever be executed:
-[ADR-003](../decisions/adr-003-human-in-the-loop-remediation.md). Every step is
-recorded for auditability.
+[ADR-003](../decisions/adr-003-human-in-the-loop-remediation.md),
+[ADR-024](../decisions/adr-024-remediation-domain-and-action-catalogue.md),
+[ADR-025](../decisions/adr-025-deterministic-remediation-policy-engine.md),
+[ADR-026](../decisions/adr-026-remediation-persistence-and-approval-workflow.md),
+[ADR-027](../decisions/adr-027-allow-listed-executor-and-local-simulation.md),
+[ADR-028](../decisions/adr-028-append-only-remediation-audit-trail.md),
+[ADR-029](../decisions/adr-029-recovery-verification.md).
+Every step is recorded — immutably — for auditability, and recovery is
+independently verified.
 
-### 7. Recovery verification — PLANNED
+**Sub-phase 5A (done):** `services/remediation-controller` domain foundation — a
+closed `RemediationActionType` enum + immutable `ACTION_CATALOGUE`, a structural
+`RemediationProposal` (no command-shaped field, `extra="forbid"`,
+`requires_approval: Literal[True]`), a `ServiceTarget` allow-list that fails
+closed on unknown services, the remediation lifecycle state machine (`EXECUTING`
+reachable only from `APPROVED`), the `RemediationApproval` model, and the
+deterministic `proposal_from_rca` mapping.
 
-After an action executes, the system re-checks the signals that defined the
-incident and records whether recovery occurred.
+**Sub-phase 5B (done):** `remediation_controller.policy` — a deterministic,
+**LLM-free** 9-rule `PolicyEngine` that independently validates a
+`RemediationProposal` (state, action, target, environment, severity, parameters,
+risk/blast-radius from the *catalogue* not `proposal.risk_level`, expiry,
+cooldown) and returns a structured `PolicyDecision`. Every rule fails closed;
+`apply_policy_decision` can only reach `PENDING_APPROVAL` or `BLOCKED`.
+
+**Sub-phase 5C (done):** the remediation-controller becomes a running service
+(`:8005`) — its own Alembic lineage (`alembic_version_remediation`, 2 tables) in
+the shared `sentinelops` database, a `RemediationService` (`proposal_from_rca` →
+`PolicyEngine` → persist as `PENDING_APPROVAL`/`BLOCKED`), and a FastAPI approval
+API (`POST /remediations`, `GET`, `POST …/approve`, `POST …/reject`). A
+deterministic role→**catalogue-risk** authorization matrix; immutable
+`remediation_approvals` rows (`UNIQUE(remediation_id)`, INSERT-only);
+concurrency-safe via `SELECT … FOR UPDATE`. The SQL repo backs the 5B
+`RemediationHistoryPort`. Request models are `extra="forbid"`; **no
+command-shaped field exists on any model, request, response, or table**.
+
+**Sub-phase 5D (done):** `remediation_controller.executor` — an allow-listed
+executor boundary + `LocalSimulationExecutor` (mutates a small in-process
+`SimulationState`; **no `subprocess` / Docker / Kubernetes / SSH / cloud SDK**).
+`POST /remediations/{id}/execute` runs an `APPROVED` remediation through the typed
+executor (`APPROVED → EXECUTING → EXECUTED | EXECUTION_FAILED`, all pre-existing
+5A states); `{"dry_run": true}` runs the same guards + executor interface but
+persists nothing and mutates no state. One real execution per remediation
+(`remediation_executions` table, `UNIQUE(remediation_id)`, `FOR UPDATE`). A
+genuine executor failure is recorded as `EXECUTION_FAILED` — never `EXECUTED`.
+The executor registry is closed and code-defined (no dynamic class loading).
+
+**Sub-phase 5E (done):** `remediation_controller.audit` + the
+`remediation_audit_events` table (migration `0003`, same lineage) — one immutable
+`RemediationAuditEvent` per committed lifecycle fact (proposal, policy decision,
+block, approve, reject, execution requested/started/succeeded/failed), written
+**in the same transaction** as the state change. Append-only at four layers: no
+write API, no repository mutation path, the app appends only its own legitimate
+events, and a PostgreSQL `BEFORE UPDATE OR DELETE` trigger rejects tampering.
+Every stored value passes a secret-redaction boundary (credential-shaped keys and
+values → `[REDACTED]`). Read-only `GET /remediations/{id}/audit` — chronological,
+paginated. A dry-run writes no event; a concurrent-approval loser's audit event
+rolls back with its transaction.
+
+**Sub-phase 5F (done):** `remediation_controller.recovery` + the
+`remediation_verifications` table (migration `0004`) — *"execution succeeded"* is
+not *"the system recovered"*, so a separate **deterministic, observe-only**
+`RecoveryVerifier` runs `EXECUTED → VERIFYING → RECOVERED | RECOVERY_FAILED`. A
+bounded virtual-clock poll loop over a `HealthProbe` (a deterministic simulation
+of the target's post-remediation health), evaluated against the verifier's *own*
+thresholds — never the probe's self-report, never an LLM. Execution-style
+`FOR UPDATE` transactions; 3 new audit events written in the same transaction;
+`UNIQUE(remediation_id)` + idempotent replay. `POST
+/remediations/{id}/verify-recovery` (no body fields). The verifier only observes:
+no command, no infrastructure client, no re-execution, no approval bypass; health
+responses are untrusted data (redacted, never parsed).
+
+**Sub-phase 5G (done):** `remediation_controller.kafka` + the `remediation.events`
+topic — after each committed transition the service publishes a versioned
+`RemediationLifecycleV1` event (closed set of 11 `event_type`s, a 1:1 mirror of
+the audit trail), keyed by `remediation_id`, **best-effort after the transaction
+commits** (the same consistency model as `incident.events` / ADR-016; the audit
+trail is the durable record, no transactional outbox). The `event_id` is
+`uuid5(namespace, audit_id)` so a consumer can dedupe a republish. The payload
+carries only safe structured metadata — no command / URL / credential field, by
+construction — and every value re-passes the Phase 5E redaction boundary. **The
+service consumes no topic; a Kafka message can never become an instruction**
+(ADR-030). `/ready` reports a `kafka` field but does not gate readiness on it.
+See [phase-5.md](phase-5.md).
+
+### 7. Recovery verification — IMPLEMENTED (Phase 5, Sub-phase 5F)
+
+After an action executes, a deterministic observe-only verifier polls a health
+signal against fixed thresholds and records whether the system actually
+recovered (`RECOVERED`) or not (`RECOVERY_FAILED`) — see Sub-phase 5F above.
 
 ### 8. MLOps lifecycle — PLANNED
 
@@ -162,7 +254,7 @@ retraining workflow. Training/evaluation is reproducible.
 | ML anomaly detection + offline evaluation | 2 (done, offline) |
 | Incident correlation + PostgreSQL | 3 (done) |
 | AI RCA agent + evidence tools | 4 (done) |
-| Approval + remediation + verification + audit | 5 |
+| Approval + remediation + verification + audit + lifecycle events | 5 (done) |
 | MLflow + monitoring + drift + retraining | 6 |
 | Observability stack | 7 |
 | Kubernetes + AWS + Terraform + hardened CI/CD | 8 |
@@ -173,11 +265,11 @@ retraining workflow. Training/evaluation is reproducible.
 | --- | --- |
 | `apps/api/` | The SentinelOps platform API (Phase 0). |
 | `apps/orders-service/` | Demo app under observation (Phase 1). |
-| `services/` | SentinelOps-internal event processors — `anomaly-detector` (live scoring) and `incident-correlator` (correlation + persistence + Incident API), Phase 3; `rca-agent` (AI investigation + Investigation API), Phase 4. |
+| `services/` | SentinelOps-internal event processors — `anomaly-detector` (live scoring) and `incident-correlator` (correlation + persistence + Incident API), Phase 3; `rca-agent` (AI investigation + Investigation API), Phase 4; `remediation-controller` (RCA→proposal mapping, policy, human approval API, `LocalSimulationExecutor`, audit trail, recovery verification, `remediation.events` publisher), Phase 5. |
 | `libs/sentinelops_common/` | Shared library: Kafka event envelope, JSON logging + OpenTelemetry setup, JSON producer, idempotent consumer. |
 | `ml/` | ML anomaly-detection subsystem: collection, data, features, models, evaluation, experiments, inference (Phase 2). |
 | `artifacts/` | `reports/` (committed experiment results), `models/` (git-ignored). |
-| `scripts/` | Developer utilities: `generate_traffic.py`, `incident_scenario.py` (Phase 3 demo), `rca_scenario.py` / `rca_e2e_scenario.py` (Phase 4 demos). |
+| `scripts/` | Developer utilities: `generate_traffic.py`, `incident_scenario.py` (Phase 3 demo), `rca_scenario.py` / `rca_e2e_scenario.py` (Phase 4 demos), `remediation_e2e_scenario.py` (Phase 5 full-chain demo). |
 | `infrastructure/` | `docker/`, `kubernetes/`, `terraform/` (Phase 7-8). |
 | `tests/` | Tests, one subpackage per component (`tests/orders_service/`, `tests/ml/`). |
 | `docs/` | `architecture/`, `decisions/` (ADRs), `development/`, `phases/`. |

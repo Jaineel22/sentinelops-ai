@@ -31,6 +31,13 @@ supersedes the old one and update the status line.
 | [021](adr-021-llm-boundary-and-injection-defense.md) | LLM boundary — deterministic authority, structured output, prompt-injection quarantine | Accepted |
 | [022](adr-022-live-llm-provider.md) | Live LLM provider — Anthropic behind the existing boundary, forced-tool-use structured output | Accepted |
 | [023](adr-023-rca-agent-integration.md) | RCA-agent integration — event idempotency, async API, no Phase 3 write-back | Accepted |
+| [024](adr-024-remediation-domain-and-action-catalogue.md) | Phase 5 remediation domain — closed action catalogue, structural no-command guarantee | Accepted |
+| [025](adr-025-deterministic-remediation-policy-engine.md) | Deterministic remediation policy engine (Phase 5B) — no LLM, fail closed, injectable history port | Accepted |
+| [026](adr-026-remediation-persistence-and-approval-workflow.md) | Remediation persistence + human approval workflow (Phase 5C) — own Alembic lineage, immutable approvals, concurrency-safe, demo identity | Accepted |
+| [027](adr-027-allow-listed-executor-and-local-simulation.md) | Allow-listed executor abstraction + LocalSimulationExecutor (Phase 5D) — typed proposal in, no infrastructure, dry-run, single execution | Accepted |
+| [028](adr-028-append-only-remediation-audit-trail.md) | Append-only remediation audit trail (Phase 5E) — immutable events, four-layer append-only enforcement, per-transition atomicity, secret redaction, read-only API | Accepted |
+| [029](adr-029-recovery-verification.md) | Recovery verification (Phase 5F) — deterministic observe-only verifier, verifier-owned thresholds, bounded virtual-clock poll loop, execution-style transactions, idempotent, no LLM / no execution authority | Accepted |
+| [030](adr-030-remediation-lifecycle-events.md) | Remediation lifecycle events on Kafka (Phase 5G) — publisher-only, closed versioned `RemediationLifecycleV1` contract on `remediation.events` keyed by `remediation_id`, best-effort after-commit publication (no outbox), deterministic `event_id`, Kafka never an execution channel | Accepted |
 
 ## Template
 

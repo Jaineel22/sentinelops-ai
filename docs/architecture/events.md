@@ -42,7 +42,7 @@ re-exports it. Payload contracts for cross-service events live in
 
 | Message part | Value |
 | --- | --- |
-| Topic | `<aggregate>.events` — `orders.events`, `anomaly.events`, `incident.events` |
+| Topic | `<aggregate>.events` — `orders.events`, `anomaly.events`, `incident.events`, `remediation.events` |
 | Key | a stable correlation id — `order_id`, `service`, `correlation_key` — so related events share a partition and keep order |
 | Value | the envelope, UTF-8 JSON |
 | Headers | `traceparent` (W3C), `tracestate` (if any), `event-type`, `event-id`, `event-version` |
@@ -87,6 +87,32 @@ re-exports it. Payload contracts for cross-service events live in
   investigation per incident; `incident.updated` / `incident.resolved` are
   ignored. Malformed events → `incident.events.dlq`.
 
+## Topic: `remediation.events` (Phase 5G)
+
+- **Payload:** `RemediationLifecycleV1` (v1) — one versioned contract shared by a
+  **closed set of 11 `event_type` values**, a 1:1 mirror of the Phase 5E/5F
+  append-only audit trail: `remediation.proposed`, `remediation.policy_evaluated`,
+  `remediation.blocked`, `remediation.approved`, `remediation.rejected`,
+  `remediation.execution_started`, `remediation.execution_succeeded`,
+  `remediation.execution_failed`, `remediation.recovery_verification_started`,
+  `remediation.recovered`, `remediation.recovery_failed`. Safe structured
+  metadata only — ids, closed-enum labels, timestamps, redacted short text.
+  **No field can carry a command, script, URL, or credential** (ADR-030).
+- **Key:** `remediation_id` — every event for one remediation shares a partition
+  and stays ordered.
+- **`event_id`:** `uuid5(namespace, audit_id)` — deterministic, so a consumer
+  keying on `event_id` deduplicates a republish after a restart.
+- Published **after** the database transaction (state change + immutable audit
+  row) commits — best-effort, application-level, the same model as
+  `incident.events` (ADR-016). A publish failure is counted + logged and never
+  rolls back the transition; the audit trail is the durable record. **No
+  transactional outbox** (ADR-030).
+- **Consumed by:** nothing yet. The `remediation-controller` publishes only and
+  consumes no topic — Kafka is never an execution channel (ADR-003, ADR-030).
+- **Creation:** `remediation-controller` creates it on startup if missing
+  (`KAFKA_AUTO_CREATE_TOPICS=true`); `KAFKA_ENABLED=false` degrades to
+  audit-trail-only.
+
 ## Producers
 
 | Producer | Events | Trigger |
@@ -94,10 +120,12 @@ re-exports it. Payload contracts for cross-service events live in
 | `orders-service` | `order.created` v1 | `POST /orders` |
 | `anomaly-detector` | `anomaly.detected` v1 | telemetry window scored as anomalous |
 | `incident-correlator` | `incident.opened` / `incident.updated` / `incident.resolved` v1 | incident created / grew / resolved |
+| `remediation-controller` | `RemediationLifecycleV1` v1 (11 `event_type`s) | a remediation lifecycle transition committed |
 
 Order publishing is synchronous and fail-closed in Phase 1
-([ADR-010](../decisions/adr-010-phase1-synchronous-publish.md)). `incident.*`
-publishing is best-effort, after the DB commit (ADR-016).
+([ADR-010](../decisions/adr-010-phase1-synchronous-publish.md)). `incident.*` and
+`remediation.*` publishing is best-effort, after the DB commit (ADR-016,
+[ADR-030](../decisions/adr-030-remediation-lifecycle-events.md)).
 
 ## Consumers
 
@@ -106,8 +134,9 @@ publishing is best-effort, after the DB commit (ADR-016).
 | `orders-service` demo consumer | **implemented** | Proves producer → Kafka → consumer; logs receipt with continued trace. Not a real processor. |
 | `incident-correlator` | **implemented** (Phase 3) | Consumes `anomaly.events`; correlates anomalies into incidents. Idempotent, at-least-once, offset committed only after the DB transaction. |
 | `rca-agent` | **implemented** (Phase 4) | Consumes `incident.events`; `incident.opened` → one bounded RCA investigation per incident. Idempotent (skips if an investigation already exists); malformed → `incident.events.dlq`. |
+| `remediation-controller` | **publisher only** (Phase 5G) | Publishes `remediation.events`; consumes no topic. A Kafka message is never interpreted as an instruction (ADR-030). |
 | ML feature capture | not planned as a stream consumer | *Reads telemetry, not this stream.* |
-| Audit | planned (Phase 5) | Durable record. |
+| Audit | **implemented** (Phase 5E) | Durable record — an in-database append-only `remediation_audit_events` table written transactionally with each transition, not a Kafka consumer. `remediation.events` is a best-effort mirror. |
 
 ## Delivery semantics & idempotency
 
