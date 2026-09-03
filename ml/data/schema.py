@@ -55,6 +55,11 @@ DERIVED_FEATURE_COLUMNS: tuple[str, ...] = (
 
 FEATURE_COLUMNS: tuple[str, ...] = SIGNAL_COLUMNS + DERIVED_FEATURE_COLUMNS
 
+# Bumped whenever ``SIGNAL_COLUMNS`` / ``DERIVED_FEATURE_COLUMNS`` change in a way
+# that makes an old model or an old monitoring baseline incompatible with new
+# features. Recorded on trained models (Phase 6) and drift baselines (Phase 6D).
+FEATURE_SCHEMA_VERSION = "1"
+
 FORBIDDEN_FEATURE_SUBSTRINGS: tuple[str, ...] = (
     "label",
     "is_anomaly",
