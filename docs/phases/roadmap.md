@@ -268,10 +268,37 @@ persists nothing but still requires approval; no 5E audit trail, 5F recovery
 verification, or 5G Kafka wiring; Phase 0–5C tests unchanged; `ruff` +
 `ruff format` + `mypy` + `pytest` green.
 
-## Phase 6 — MLOps lifecycle — planned
+## Phase 6 — MLOps lifecycle — done (2026-09-03)
 
-MLflow experiment tracking + registry (model aliases, not stages); model
-monitoring; drift detection; retraining workflow.
+Turns the Phase 2 detector into a reproducible, versioned, observable ML
+lifecycle around the **same** Isolation Forest + the **same** evaluation
+methodology (which stays authoritative). All sub-phases done:
+**6A** MLflow experiment tracking (each run's params / real metrics / artifacts /
+git-SHA + library lineage; local Compose server) · **6B** model registry +
+`candidate`/`champion`/`previous-champion` **aliases** (not stages) promoted only
+through a deterministic gate (`evaluate_candidate`, no LLM) · **6C** the
+anomaly-detector resolves the `champion` alias at startup with an explicit,
+logged local fallback · **6D** per-feature **PSI** drift detection against a
+training baseline frozen with the champion; drift ≠ degradation · **6E**
+`python -m ml.mlops retrain` reuses the Phase 2 pipeline, logs + registers, and
+runs the 6B gate — opt-in promotion, no autonomous deployment / scheduler · **6F**
+`scripts/phase6_e2e_demo.py` (`make phase6-demo`), a non-blocking Postgres-backed
+CI job, and docs. `docs/architecture/phase-6.md`,
+[docs/phase6-summary.md](../phase6-summary.md),
+[ADR-031](../decisions/adr-031-mlflow-tracking-and-registry.md),
+[ADR-032](../decisions/adr-032-model-alias-strategy.md),
+[ADR-033](../decisions/adr-033-model-promotion-criteria.md),
+[ADR-034](../decisions/adr-034-drift-detection-methodology.md).
+
+**Exit criteria (met):** MLflow integrated; runs record real params + metrics +
+artifacts + dataset/feature/code lineage; models registered with aliases;
+deterministic promotion gate that a failed candidate cannot bypass; a baseline
+distribution associable with a model version; data/feature drift detection with
+tested drift + no-drift scenarios, kept distinct from label-dependent
+performance degradation; a controlled retraining workflow that produces a tracked
+run and passes evaluation before promotion; existing inference + Phase 0–5 tests
+still pass; Ruff + format + mypy green; Compose valid; a reproducible end-to-end
+demo; no secrets; no fabricated metrics; no Phase 7/8 functionality.
 
 ## Phase 7 — Observability stack — planned
 

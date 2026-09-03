@@ -155,6 +155,119 @@ python -m ml.collection.collector --run-id run_b --plan holdout
 make data-prepare                                   # -> ml/data/processed/sentinelops/
 ```
 
+### Phase 6A: MLflow experiment tracking (optional)
+
+Install the client (`mlflow-skinny`) with the `mlops` extra — it does **not**
+change your pandas/numpy versions:
+
+```bash
+pip install -e ".[dev,ml,incident,detector,rca,remediation,mlops]"
+```
+
+With `MLFLOW_TRACKING_URI` unset, `make ml-experiments` behaves exactly as in
+Phase 2. Set it to record runs:
+
+```bash
+# Offline, no server (how the tests run) — a local sqlite store:
+export MLFLOW_TRACKING_URI="sqlite:///mlruns/mlflow.db"
+python -m ml.experiments run exp3_comparison_sentinelops   # + one MLflow run per model
+
+# Or the shared local server (UI at http://localhost:5000):
+docker compose up -d --build mlflow        # also starts postgres + the one-shot mlflow-init
+export MLFLOW_TRACKING_URI="http://localhost:5000"
+python -m ml.experiments run exp3_comparison_sentinelops
+```
+
+`metrics.json` / `summary.md` under `artifacts/reports/` stay authoritative and
+unchanged either way.
+
+### Phase 6B: model registry + alias promotion
+
+Needs a DB-backed store (sqlite or the `http://localhost:5000` server) — a bare
+`file:` store cannot hold model versions or aliases.
+
+```bash
+# after an experiment run has logged a run to MLflow, grab its run id from the UI
+python -m ml.mlops register --model-path artifacts/models/<exp>__isolation_forest.joblib --run-id <run_id>
+python -m ml.mlops promote  --candidate-version 1 --reason "initial champion"
+python -m ml.mlops list-models
+python -m ml.mlops get-champion
+```
+
+`promote` runs the deterministic gate (`ml/mlops/promotion.py`, ADR-033) — a
+candidate that misses the F1 / recall / PR-AUC floors or regresses on F1 vs the
+champion is **rejected** (exit 1) and the `champion` alias is left untouched.
+
+### Phase 6C: registry-backed inference
+
+```bash
+# host / compose default: MLFLOW_TRACKING_URI empty -> anomaly-detector loads the
+# local bundle, exactly as Phases 3-5.
+
+# opt in (from the host):   MLFLOW_TRACKING_URI=http://localhost:5000 make run-detector
+# opt in (under compose):   set MLFLOW_TRACKING_URI=http://mlflow:5000 in your .env, then
+MLFLOW_TRACKING_URI=http://mlflow:5000 docker compose up -d --build anomaly-detector
+curl -s http://localhost:8003/ready | python -m json.tool      # model_source / model_version
+curl -s http://localhost:8003/model-info | python -m json.tool
+```
+
+`MLFLOW_REQUIRED=false` (default) falls back to the local bundle (logged,
+`model_source: local-fallback`) if the registry is down; `=true` makes `/ready`
+report 503 instead. See [docs/architecture/phase-6.md](../architecture/phase-6.md).
+
+### Phase 6D: drift detection
+
+```bash
+# freeze a reference distribution from training data...
+python -m ml.monitoring baseline --model-version 1 \
+  --data ml/data/processed/sentinelops/run_a/windows.csv \
+  --output artifacts/models/run_a__baseline.joblib
+
+# ...then check a later window against it (exit 1 on significant drift)
+python -m ml.monitoring check \
+  --baseline artifacts/models/run_a__baseline.joblib \
+  --data ml/data/processed/sentinelops/run_b/windows.csv \
+  --output artifacts/reports/drift_run_b.json
+```
+
+`run_experiment` also freezes a baseline per experiment (saved next to the models
+and, when `MLFLOW_TRACKING_URI` is set, logged with each run so a registered
+model version carries it). PSI bands: `<0.1` none, `0.1-0.25` moderate, `>=0.25`
+significant. Methodology + limitations:
+[ADR-034](../decisions/adr-034-drift-detection-methodology.md).
+
+### Phase 6E: reproducible retraining
+
+Needs a reachable MLflow (`MLFLOW_TRACKING_URI`).
+
+```bash
+export MLFLOW_TRACKING_URI="sqlite:///mlruns/mlflow.db"   # or http://localhost:5000
+
+# retrain (reuses the Phase 2 pipeline), track, register, run the 6B gate
+python -m ml.mlops retrain --dataset run_a --seed 42                 # exit 0 = gate passed
+python -m ml.mlops retrain --dataset run_a --seed 42 --promote-if-passing
+
+make mlops-retrain-demo      # scripts/retraining_demo.py
+make mlops-drift-retrain     # drift detected -> retrain -> gate  (scripts/drift_triggered_retraining.py)
+```
+
+Deterministic: same `--dataset` + `--seed` → identical metrics. Promotion is
+opt-in and still runs `evaluate_candidate` — no autonomous deployment.
+
+### Phase 6F: end-to-end demo
+
+```bash
+make phase6-demo        # scripts/phase6_e2e_demo.py — no server needed
+make phase6-summary     # one-screen recap of Phase 6
+```
+
+`phase6-demo` runs the whole lifecycle in one deterministic command against a
+throwaway sqlite store (printed at the end so you can open it with `mlflow ui`):
+train champion on `run_a` → register + promote → load it from the registry →
+drift-check on `run_b` → retrain on `run_b` → gate → promote. Set
+`MLFLOW_TRACKING_URI` to run against a shared store instead. See
+[docs/phase6-summary.md](../phase6-summary.md).
+
 ## 9. Phase 3: incident correlation
 
 ```bash

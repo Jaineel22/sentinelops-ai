@@ -1,8 +1,8 @@
 # SentinelOps AI
 
-> **Current status: Phase 4 — AI RCA / investigation agent.**
-> Phases 0–4 are implemented and tested (see [Current status](#current-status)).
-> Phases 5–8 under [Planned architecture](#planned-architecture) and
+> **Current status: Phase 6 — MLOps lifecycle (complete).**
+> Phases 0–6 are implemented and tested (see [Current status](#current-status)).
+> Phases 7–8 under [Planned architecture](#planned-architecture) and
 > [Technology roadmap](#technology-roadmap) are future work and are labelled as such.
 
 ## What it is
@@ -52,9 +52,14 @@ LangGraph investigation (plan → collect →         [Phase 4]
    ↓
 Evidence-backed RCA report (schema-validated)     [Phase 4]
    ↓
-Human-approved remediation recommendation         [Phase 5, planned]
+Deterministic RCA→proposal mapping (closed        [Phase 5]  →  remediation.proposed
+  action catalogue) + LLM-free policy engine      [Phase 5]  →  remediation.policy_evaluated
    ↓
-Recovery verification + audit trail               [Phase 5+, planned]
+Explicit human approval (identity + role + reason)[Phase 5]  →  remediation.approved
+   ↓
+Allow-listed LocalSimulationExecutor              [Phase 5]  →  remediation.execution_succeeded
+   ↓
+Append-only audit trail + recovery verification   [Phase 5]  →  remediation.recovered
 ```
 
 Two responsibilities are kept **separate on purpose** — an LLM API call is *not*
@@ -69,11 +74,12 @@ the ML component ([ADR-002](docs/decisions/adr-002-ml-and-llm-separation.md)):
 
 ## Planned architecture
 
-> Target design. **Phases 0–4 exist and are tested** (the Kafka backbone,
+> Target design. **Phases 0–6 exist and are tested** (the Kafka backbone,
 > `orders-service`, live anomaly detection, incident correlation + PostgreSQL,
-> and the LangGraph RCA agent with its Investigation API). Policy validation,
-> human-approval workflow, action execution, recovery verification, and the
-> observability stack are future work. See [Current status](#current-status).
+> the LangGraph RCA agent, human-approved remediation with audit + recovery
+> verification, and the MLflow-backed MLOps lifecycle). The deployed
+> observability stack (Phase 7) and orchestration / cloud / IaC (Phase 8) are
+> future work. See [Current status](#current-status).
 
 ```mermaid
 flowchart LR
@@ -97,10 +103,12 @@ flowchart LR
   AGENT -->|RCAReport| DB
   AGENT --> API["Investigation API<br/>POST /investigations, GET /investigations/id"]
 
-  API --> HUMAN{"Human approval (Phase 5)"}
-  HUMAN -->|approved| ACT["Allow-listed action executor (Phase 5)"]
-  ACT --> VERIFY["Recovery verification (Phase 5+)"]
-  VERIFY --> AUDIT[("Audit log (Phase 5+)")]
+  API --> REM["remediation-controller (Phase 5):<br/>RCA→proposal mapping, LLM-free policy engine"]
+  REM --> HUMAN{"Explicit human approval<br/>(identity + role + reason)"}
+  HUMAN -->|approved| ACT["LocalSimulationExecutor<br/>(allow-listed, no real infra)"]
+  ACT --> AUDIT[("Append-only audit trail<br/>(PostgreSQL)")]
+  AUDIT --> VERIFY["Recovery verification<br/>(deterministic, observe-only)"]
+  VERIFY -->|remediation.events| K
 
   MLF["MLflow (Phase 6)"] -.model aliases.-> AD
   GRAF["Grafana (Phase 7)"] --- OBS
@@ -113,7 +121,8 @@ Introduced **only in the phase that needs it**, never earlier:
 | Area | Direction |
 | --- | --- |
 | Backend | Python, FastAPI |
-| ML | scikit-learn, XGBoost, pandas, NumPy, MLflow (model aliases, not stages); PyTorch only if justified |
+| ML | scikit-learn, pandas, NumPy; XGBoost / PyTorch only if justified (not used) |
+| MLOps | MLflow (experiment tracking + model registry with **aliases, not stages**); PSI drift detection; a deterministic promotion gate + retraining workflow ([Phase 6](#phase-6--mlops-lifecycle-done)) |
 | AI agent | LangGraph (or an equivalent explicit state-machine agent), an LLM API, tool calling |
 | Data | PostgreSQL; Redis where justified |
 | Messaging | Apache Kafka (event backbone) |
@@ -136,8 +145,8 @@ Introduced **only in the phase that needs it**, never earlier:
 | **2** | ML anomaly-detection pipeline + offline evaluation (real metrics) | **done** |
 | **3** | Incident correlation + persistence (deterministic rules, PostgreSQL, Incident API) | **done** |
 | **4** | AI RCA agent — LangGraph investigation, controlled read-only evidence tools, mock/live LLM boundary, Investigation API | **done** |
-| 5 | Human-approved, allow-listed remediation + recovery verification + audit | planned |
-| 6 | MLOps lifecycle: MLflow, model monitoring, drift detection, retraining | planned |
+| **5** | Human-approved, allow-listed remediation — closed action catalogue, LLM-free policy engine, human approval workflow/API, `LocalSimulationExecutor`, append-only audit trail, recovery verification, `remediation.events` Kafka lifecycle events | **done** |
+| **6** | MLOps lifecycle — MLflow experiment tracking + model registry, alias-based promotion (`champion`/`candidate`) through a deterministic gate, registry-backed inference, PSI drift detection, reproducible retraining workflow | **done** |
 | 7 | Observability stack (OpenTelemetry, Prometheus, Loki, Tempo, Grafana) | planned |
 | 8 | Kubernetes, cloud (AWS), Terraform, hardened CI/CD | planned |
 
@@ -153,11 +162,12 @@ ones. See [docs/phases/roadmap.md](docs/phases/roadmap.md).
 # 1. Virtual environment + dependencies
 python -m venv .venv
 source .venv/Scripts/activate      # Windows Git Bash;  .venv/bin/activate on Unix
-pip install -e ".[dev,ml,incident,detector,rca]"
+pip install -e ".[dev,ml,incident,detector,rca,remediation]"
 cp .env.example .env
 
-# 2. The full pipeline (Phases 1 + 3 + 4): Kafka, PostgreSQL, orders-service,
-#    anomaly-detector, incident-correlator, rca-agent (+ two one-shot migrations)
+# 2. The full pipeline (Phases 1 + 3 + 4 + 5): Kafka, PostgreSQL, orders-service,
+#    anomaly-detector, incident-correlator, rca-agent, remediation-controller
+#    (+ three one-shot migrations)
 docker compose up --build -d
 python scripts/generate_traffic.py --scenario sequence --duration 40 --rate 6
 curl -s http://localhost:8002/incidents | python -m json.tool            # the correlated incident
@@ -165,12 +175,17 @@ INC=$(curl -s http://localhost:8002/incidents | python -c "import sys,json;print
 curl -s "http://localhost:8004/incidents/$INC/investigation" | python -m json.tool  # the RCA the agent produced
 
 # 3. Deterministic demos — no Kafka, no DB, no LLM API key
-make incident-scenario     # Phase 3: anomalies -> ONE incident
-make rca-scenario          # Phase 4: one incident -> investigation -> validated RCA
-make rca-e2e-scenario      # Phase 4: incident.opened envelope -> consumer -> RCA -> API
+make incident-scenario        # Phase 3: anomalies -> ONE incident
+make rca-scenario             # Phase 4: one incident -> investigation -> validated RCA
+make rca-e2e-scenario         # Phase 4: incident.opened envelope -> consumer -> RCA -> API
+make remediation-e2e-scenario # Phase 5: incident -> RCA -> approve -> simulated execute
+                              #          -> audit -> recovery verify -> lifecycle events
 
 # 4. Phase 2 ML: reproduce every experiment on the committed datasets
 make ml-experiments        # -> artifacts/reports/ + summary.md
+
+# 5. Phase 6 MLOps: the whole lifecycle in one deterministic run (sqlite, no server)
+make phase6-demo           # train champion -> register -> drift -> retrain -> gate -> promote
 ```
 
 `rca-agent` (`:8004`) defaults to `RCA_MODE=mock` — the whole chain runs with
@@ -197,7 +212,10 @@ Tests live in [tests/](tests/): platform API smoke tests,
 [tests/orders_service/](tests/orders_service/) (order validation, event schema,
 publisher, failure injection, instrumentation, a Kafka round-trip),
 [tests/ml/](tests/ml/) (parsing, feature causality & no-leakage, splits,
-detectors, inference, metrics, an experiment repro check),
+detectors, inference, metrics, an experiment repro check, and the **Phase 6
+MLOps** suite — MLflow tracking/registry/promotion gate, PSI drift, the
+retraining workflow, and an end-to-end lifecycle demo, all against a local
+sqlite MLflow store),
 [tests/incident_correlator/](tests/incident_correlator/) (correlation, severity,
 state machine, SQL repository, a Kafka→Postgres integration test), and
 [tests/rca_agent/](tests/rca_agent/) (tool registry & bounds, the LangGraph
@@ -208,10 +226,12 @@ a real Kafka+Postgres end-to-end test).
 ## Environment variables
 
 `.env.example` is the documented template of every supported variable, grouped by
-prefix (`APP_`, `KAFKA_`, `DB_`, `DETECTOR_`, `RCA_`, `LLM_`, …). Copy it to
-`.env` (git-ignored) for local development. Every service reads its config through
-a typed `pydantic-settings` object — no code reads `os.environ` directly, and
-`LLM_API_KEY` is a `SecretStr` that is never logged or serialised.
+prefix (`APP_`, `KAFKA_`, `DB_`, `DETECTOR_`, `RCA_`, `LLM_`, `MLFLOW_`, …). Copy
+it to `.env` (git-ignored) for local development. Every service reads its config
+through a typed `pydantic-settings` object — no code reads `os.environ` directly,
+and `LLM_API_KEY` is a `SecretStr` that is never logged or serialised.
+`MLFLOW_TRACKING_URI` is empty by default — the ML pipeline and the
+anomaly-detector then behave exactly as in Phases 2–5.
 
 ## Security principles
 
@@ -394,9 +414,123 @@ Details: [docs/architecture/phase-3.md](docs/architecture/phase-3.md) ·
 
 Details: [docs/architecture/phase-4.md](docs/architecture/phase-4.md).
 
-**Not implemented** (later phases): remediation policy validation, the
-human-approval workflow, an allow-listed **action executor**, and recovery
-verification (Phase 5); MLflow / model registry / drift detection (Phase 6); a
-deployed observability stack — Prometheus / Loki / Tempo / Grafana / an OTel
-collector (Phase 7); Kubernetes, AWS, Terraform, hardened CI/CD (Phase 8);
-authentication; cross-service / topology-aware correlation.
+### Phase 5 — Human-approved remediation *(done)*
+
+- **`remediation-controller`** (`services/remediation-controller`, `:8005`) — a
+  separate service that turns a Phase 4 RCA recommendation into typed *intent* a
+  human must approve. **AI recommendation ≠ execution authority** — the rca-agent
+  never gains a write path
+  ([ADR-003](docs/decisions/adr-003-human-in-the-loop-remediation.md),
+  [ADR-024](docs/decisions/adr-024-remediation-domain-and-action-catalogue.md)).
+- **Closed action catalogue (5A)** — `RemediationActionType` is a closed enum
+  (`RESTART_SERVICE`, `SCALE_SERVICE`, `ROLL_BACK_DEPLOYMENT`,
+  `DISABLE_FEATURE_FLAG`); there is no `EXECUTE_COMMAND` / `RUN_SHELL` member by
+  construction. `RemediationProposal` is `extra="forbid"` with no command-shaped
+  field, `requires_approval: Literal[True]`, a code-defined immutable catalogue,
+  and a `{"orders-service"}` target allow-list that fails closed.
+  `proposal_from_rca` is the only path from a recommendation to a proposal —
+  deterministic, total, and fail-closed to a terminal `BlockedProposal`.
+- **Deterministic policy engine (5B)** — a 9-rule, **LLM-free** `PolicyEngine`
+  (state · action · target · environment · severity · parameters ·
+  risk/blast-radius from the catalogue · expiry · cooldown) returning a
+  structured `PolicyDecision`; a policy `ALLOW` only reaches `PENDING_APPROVAL`
+  ([ADR-025](docs/decisions/adr-025-deterministic-remediation-policy-engine.md)).
+- **Persistence + human approval workflow/API (5C)** — its own Alembic lineage
+  (`alembic_version_remediation`) in the shared database; `POST /remediations`,
+  `GET`, `POST …/approve|reject` with a deterministic role→catalogue-risk
+  authorization matrix; immutable `remediation_approvals` rows
+  (`UNIQUE(remediation_id)`); concurrency-safe (`SELECT … FOR UPDATE`)
+  ([ADR-026](docs/decisions/adr-026-remediation-persistence-and-approval-workflow.md)).
+- **Allow-listed `LocalSimulationExecutor` (5D)** — `POST /remediations/{id}/execute`
+  runs an `APPROVED` remediation through a typed executor
+  (`APPROVED → EXECUTING → EXECUTED | EXECUTION_FAILED`); `{"dry_run": true}`
+  previews with zero side effects. **No `subprocess` / Docker / Kubernetes / SSH
+  / cloud SDK anywhere** (AST-enforced) — a local simulation only
+  ([ADR-027](docs/decisions/adr-027-allow-listed-executor-and-local-simulation.md)).
+- **Append-only audit trail (5E)** — one immutable `remediation_audit_events`
+  row per committed lifecycle fact, written **in the same transaction** as the
+  transition; four-layer append-only enforcement (no write API, no repo mutation
+  path, app-appends-only, a PostgreSQL `BEFORE UPDATE OR DELETE` trigger); a
+  secret-redaction boundary on every stored value; read-only
+  `GET /remediations/{id}/audit`
+  ([ADR-028](docs/decisions/adr-028-append-only-remediation-audit-trail.md)).
+- **Recovery verification (5F)** — `EXECUTED → VERIFYING → RECOVERED |
+  RECOVERY_FAILED` via a deterministic, **observe-only** `RecoveryVerifier`: a
+  bounded virtual-clock poll loop over a `HealthProbe`, evaluated against the
+  verifier's *own* thresholds, never an LLM. `POST /remediations/{id}/verify-recovery`
+  (no body fields); idempotent replay
+  ([ADR-029](docs/decisions/adr-029-recovery-verification.md)).
+- **Kafka lifecycle events (5G)** — after each committed transition the service
+  publishes a versioned `RemediationLifecycleV1` event onto `remediation.events`
+  (keyed by `remediation_id`), best-effort **after the transaction commits**
+  (same model as `incident.events`; no transactional outbox). It **consumes no
+  topic** — Kafka is never an execution channel. A deterministic `event_id`
+  (`uuid5` of the audit-row id) lets consumers dedupe a republish
+  ([ADR-030](docs/decisions/adr-030-remediation-lifecycle-events.md)).
+- **Docker Compose** — `docker compose up --build` adds `remediation-migrate`
+  (one-shot) and `remediation-controller`, wired to Kafka + PostgreSQL.
+  Deterministic demo: `make remediation-e2e-scenario` (incident → RCA → approve →
+  simulated execute → audit → recovery verify → lifecycle events).
+
+Details: [docs/architecture/phase-5.md](docs/architecture/phase-5.md).
+
+### Phase 6 — MLOps lifecycle *(done)*
+
+Turns the Phase 2 detector from *"we trained a model"* into a **reproducible,
+versioned, observable ML lifecycle** — the Phase 2 evaluation methodology stays
+authoritative; MLflow *records* it, never replaces it.
+
+- **Experiment tracking (6A)** — `ml/mlops/tracking.py`: `run_experiment` mirrors
+  each model's run into MLflow (params, hyperparameters, real `ml.evaluation`
+  metrics, artifacts, and a reproducibility lineage block — git SHA, Python +
+  library versions). Additive and fail-safe; the offline pipeline is unchanged
+  when `MLFLOW_TRACKING_URI` is unset. Local server via Docker Compose (`mlflow`
+  + one-shot `mlflow-init`, Postgres backend store, HTTP-served artifacts,
+  `http://localhost:5000`) — nothing in Phases 1–5 depends on it
+  ([ADR-031](docs/decisions/adr-031-mlflow-tracking-and-registry.md)).
+- **Model registry + alias promotion (6B)** — `ml/mlops/registry.py` registers
+  each bundle as an MLflow **model version** and manages the `candidate` /
+  `champion` / `previous-champion` **aliases** (never deprecated stages —
+  [ADR-032](docs/decisions/adr-032-model-alias-strategy.md)). `ml/mlops/promotion.py`
+  is the deterministic gate: `evaluate_candidate` (pure, no LLM) checks F1 /
+  recall / PR-AUC floors grounded in the committed Phase 2 numbers plus a
+  no-F1-regression guard vs the champion; a failing candidate stays `candidate`
+  ([ADR-033](docs/decisions/adr-033-model-promotion-criteria.md)). CLI:
+  `python -m ml.mlops {register,promote,list-models,get-champion}`.
+- **Registry-backed inference (6C)** — `DetectorService.from_registry` resolves
+  the `champion` alias and loads that version with the **existing**
+  `AnomalyDetector.load` (no `mlflow.pyfunc`/`sklearn` flavors). The
+  `anomaly-detector` service resolves it once at startup when
+  `MLFLOW_TRACKING_URI` is set (cached); `MLFLOW_REQUIRED=true` → `/ready`
+  reports 503 if the registry is down, `=false` → explicit `local-fallback`.
+  `/ready` and `/model-info` report `model_source` / `model_version`. Unset →
+  behaves exactly as Phases 3–5.
+- **Drift detection (6D)** — `ml/monitoring/`: `freeze_baseline` snapshots a
+  model's **training** feature distribution (per-feature quantile bins + stats,
+  labels excluded) and stores it with the champion; `detect_drift` compares a
+  window of **production** features against it with the **Population Stability
+  Index** (standard `<0.1 / 0.1–0.25 / ≥0.25` bands, overall = most severe).
+  Prediction drift is a separate field; drift ≠ degradation
+  ([ADR-034](docs/decisions/adr-034-drift-detection-methodology.md)). CLI:
+  `python -m ml.monitoring {baseline,check}`.
+- **Reproducible retraining (6E)** — `ml/mlops/retraining.py`:
+  `python -m ml.mlops retrain --dataset run_a [--seed N] [--promote-if-passing]`
+  reuses the whole Phase 2 pipeline (load → split → features → train → calibrate
+  on validation → evaluate on test), logs + registers, and runs the 6B gate.
+  Deterministic (same dataset + seed → identical metrics). Promotion is **opt-in**
+  and still gated — no autonomous deployment, no scheduler.
+  `scripts/drift_triggered_retraining.py` and `scripts/phase6_e2e_demo.py` show
+  the full loop.
+
+Details: [docs/architecture/phase-6.md](docs/architecture/phase-6.md) ·
+[docs/phase6-summary.md](docs/phase6-summary.md). Try it:
+`MLFLOW_TRACKING_URI=sqlite:///mlruns/mlflow.db make phase6-demo`.
+
+**Not implemented** (later phases): a deployed observability stack — Prometheus /
+Loki / Tempo / Grafana / an OTel collector (Phase 7); Kubernetes, AWS, Terraform,
+hardened CI/CD (Phase 8); real-infrastructure remediation executors and
+autonomous remediation (out of scope by design —
+[ADR-003](docs/decisions/adr-003-human-in-the-loop-remediation.md));
+autonomous / scheduled retraining (Phase 6 is CLI-driven by design);
+authentication (the approver identity model is a demo, not auth);
+cross-service / topology-aware correlation.

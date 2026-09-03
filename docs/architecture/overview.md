@@ -8,7 +8,7 @@ tracks what is actually built. It is updated at the end of every phase.
 - **IMPLEMENTED** — exists in the repository and is tested.
 - **PLANNED** — target design; no code yet.
 
-## Current state (through Phase 5)
+## Current state (through Phase 6)
 
 **IMPLEMENTED**
 
@@ -37,7 +37,8 @@ tracks what is actually built. It is updated at the end of every phase.
   published after each committed transition (5G). Human approval is mandatory;
   no real infrastructure is touched.
 
-See the per-phase docs. Sections 8-10 below are **PLANNED**.
+See the per-phase docs. Section 8 (MLOps lifecycle) is implemented; sections
+9–10 below are **PLANNED**.
 
 ## Target architecture
 
@@ -225,11 +226,81 @@ After an action executes, a deterministic observe-only verifier polls a health
 signal against fixed thresholds and records whether the system actually
 recovered (`RECOVERED`) or not (`RECOVERY_FAILED`) — see Sub-phase 5F above.
 
-### 8. MLOps lifecycle — PLANNED
+### 8. MLOps lifecycle — IMPLEMENTED (Phase 6)
 
-**MLflow** for experiment tracking and model registry, using **model aliases**
-(not deprecated stage transitions). Model monitoring and drift detection feed a
-retraining workflow. Training/evaluation is reproducible.
+**What Phase 6 delivers:** the Phase 2 detector becomes a reproducible,
+versioned, observable ML lifecycle around the *same* Isolation Forest and the
+*same* evaluation methodology. **MLflow** records experiments and holds the model
+registry, promoted through **aliases** (`candidate` / `champion` /
+`previous-champion`, never deprecated stages) via a deterministic, LLM-free gate.
+The anomaly-detector resolves the `champion` alias at startup (fail-safe).
+Per-feature **PSI** drift detection runs against a training baseline frozen with
+the champion, and a `python -m ml.mlops retrain` workflow reuses the Phase 2
+pipeline end to end and runs the same gate — promotion stays opt-in and manual.
+One-pager: [phase6-summary.md](../phase6-summary.md).
+
+**Sub-phase 6A (done):** `ml/mlops/` — a typed `MLflowSettings` and a best-effort
+`log_run` that mirrors each Phase 2 training run (parameters, hyperparameters,
+lineage, real evaluation metrics, artifacts) into MLflow. `ml/experiments/runner.py`
+logs to MLflow when `MLFLOW_TRACKING_URI` is set; `metrics.json` / `summary.md`
+stay authoritative and unchanged. Docker Compose gains a local MLflow server
+(`mlflow` + one-shot `mlflow-init`, Postgres backend store, HTTP-served
+artifacts, `http://localhost:5000`) that nothing in Phases 1–5 depends on.
+[ADR-031](../decisions/adr-031-mlflow-tracking-and-registry.md).
+
+**Sub-phase 6B (done):** `ml/mlops/registry.py` registers each model bundle as an
+MLflow **model version** and manages the `candidate` / `champion` /
+`previous-champion` **aliases** (never MLflow stages —
+[ADR-032](../decisions/adr-032-model-alias-strategy.md)).
+`ml/mlops/promotion.py` is the deterministic gate: `evaluate_candidate` (pure, no
+LLM) checks a candidate's F1 / recall / PR-AUC against absolute floors grounded
+in the committed Phase 2 numbers and against no-F1-regression vs the champion
+([ADR-033](../decisions/adr-033-model-promotion-criteria.md)); a failing
+candidate stays `candidate` and the champion is untouched. `python -m ml.mlops`
+CLI: `register`, `promote`, `list-models`, `get-champion`.
+
+**Sub-phase 6C (done):** `DetectorService.from_registry(settings)` resolves the
+`champion` alias, downloads that version's bundle, and loads it with the existing
+`AnomalyDetector.load` (no `mlflow.pyfunc`/`sklearn` flavors). The
+`anomaly-detector` service resolves the registry model at startup when
+`MLFLOW_TRACKING_URI` is set (cached — no per-request reload); with
+`MLFLOW_REQUIRED=true` an unreachable registry makes `/ready` report 503, with
+`=false` it falls back to the local bundle, logged, tagged `local-fallback`.
+`/ready` and a new `/model-info` report `model_source` / `model_version` /
+`model_type`. With `MLFLOW_TRACKING_URI` unset the service behaves exactly as in
+Phases 3–5.
+
+**Sub-phase 6D (done):** `ml/monitoring/` — `freeze_baseline` snapshots a
+model's **training** feature distribution (per-feature quantile bins + stats,
+labels excluded) as a `BaselineDistribution`, stored with the champion model
+version. `detect_drift` compares a later window of **production** features
+against it with the **Population Stability Index** (per-feature PSI, standard
+`<0.1 / 0.1-0.25 / >=0.25` bands, overall = most severe), returning a
+`DriftReport`. Prediction drift (anomaly-rate change) is a separate field;
+neither is evidence of model *performance* degradation, which needs labels.
+Deterministic, no LLM ([ADR-034](../decisions/adr-034-drift-detection-methodology.md)).
+CLI: `python -m ml.monitoring {baseline,check}`.
+
+**Sub-phase 6E (done):** `ml/mlops/retraining.py` — `retrain_pipeline(config)`
+runs the **existing** Phase 2 pipeline (load → split → features → train →
+calibrate on validation → evaluate on test), freezes a drift baseline, logs the
+run (6A), registers a new model version (6B), and runs it through the
+deterministic `evaluate_candidate` gate vs the champion (6B). Deterministic (same
+dataset + seed → same metrics). `python -m ml.mlops retrain --dataset run_a
+[--seed N] [--promote-if-passing]`; `scripts/drift_triggered_retraining.py`
+shows drift → retrain → gate. Promotion is **opt-in** and still gated — no
+autonomous deployment, no scheduler. Orchestration only; no Phase 2 code
+reimplemented.
+
+**Sub-phase 6F (done):** `scripts/phase6_e2e_demo.py` (`make phase6-demo`) runs
+the whole lifecycle deterministically in one command (no server needed);
+`tests/ml/test_phase6_e2e.py` asserts it; a non-blocking `mlflow-integration` CI
+job exercises the Postgres-backed store; docs (this file, `phase-6.md`,
+`phase6-summary.md`, `README.md`, `roadmap.md`, `setup.md`) are complete.
+
+Phase 6 is **complete** — see [phase-6.md § 10](phase-6.md) for the exit-criteria
+checklist. Full write-up: [phase-6.md](phase-6.md) ·
+[phase6-summary.md](../phase6-summary.md).
 
 ### 9. Observability stack — PLANNED
 
@@ -255,7 +326,7 @@ retraining workflow. Training/evaluation is reproducible.
 | Incident correlation + PostgreSQL | 3 (done) |
 | AI RCA agent + evidence tools | 4 (done) |
 | Approval + remediation + verification + audit + lifecycle events | 5 (done) |
-| MLflow + monitoring + drift + retraining | 6 |
+| MLflow tracking + registry + drift + retraining | 6 (done) |
 | Observability stack | 7 |
 | Kubernetes + AWS + Terraform + hardened CI/CD | 8 |
 
