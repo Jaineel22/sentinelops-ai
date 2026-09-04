@@ -110,6 +110,32 @@ class IncidentSummary(BaseModel):
         )
 
 
+class RelatedIncidentOut(BaseModel):
+    """A cross-service incident linked to this one (Phase 8)."""
+
+    id: str
+    service: str
+    environment: str
+    status: IncidentStatus
+    severity: Severity
+    title: str
+    started_at: datetime
+    last_evidence_at: datetime
+
+    @classmethod
+    def of(cls, i: Incident) -> RelatedIncidentOut:
+        return cls(
+            id=i.id,
+            service=i.service,
+            environment=i.environment,
+            status=i.status,
+            severity=i.severity,
+            title=i.title,
+            started_at=i.started_at,
+            last_evidence_at=i.last_evidence_at,
+        )
+
+
 class IncidentDetail(IncidentSummary):
     severity_reasons: list[str]
     abnormal_signal_names: list[str]
@@ -122,9 +148,10 @@ class IncidentDetail(IncidentSummary):
     resolution: str | None
     evidence: list[EvidenceOut]
     history: list[TransitionOut]
+    related_incidents: list[RelatedIncidentOut] = Field(default_factory=list)
 
     @classmethod
-    def of(cls, i: Incident) -> IncidentDetail:
+    def of(cls, i: Incident, *, related: list[Incident] | None = None) -> IncidentDetail:
         summary = IncidentSummary.of(i).model_dump()
         return cls(
             **summary,
@@ -139,6 +166,7 @@ class IncidentDetail(IncidentSummary):
             resolution=i.resolution,
             evidence=[EvidenceOut.of(e) for e in i.evidence],
             history=[TransitionOut.of(t) for t in i.history],
+            related_incidents=[RelatedIncidentOut.of(r) for r in (related or [])],
         )
 
 
@@ -246,7 +274,9 @@ async def list_incidents(
 
 @incidents_router.get("/{incident_id}", response_model=IncidentDetail)
 async def get_incident(incident_id: str, request: Request) -> IncidentDetail:
-    return IncidentDetail.of(await _load(request, incident_id))
+    incident = await _load(request, incident_id)
+    related = await _repo(request).get_related_incidents(incident_id)
+    return IncidentDetail.of(incident, related=related)
 
 
 @incidents_router.get("/{incident_id}/evidence", response_model=list[EvidenceOut])

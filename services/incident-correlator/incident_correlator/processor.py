@@ -33,6 +33,8 @@ from incident_correlator.domain import (
     AnomalySignal,
     EvidenceRecord,
     Incident,
+    IncidentRelation,
+    IncidentRelationType,
     IncidentStatus,
     Severity,
     StateTransition,
@@ -44,6 +46,12 @@ from incident_correlator.repository import (
     IncidentUnitOfWork,
 )
 from incident_correlator.severity import SeverityConfig, SeverityInputs, evaluate_severity
+from incident_correlator.topology import (
+    TopologyConfig,
+    dependencies_of,
+    incidents_overlap,
+    related_services,
+)
 from sentinelops_common.kafka import KafkaJsonProducer, RetryableError
 
 logger = logging.getLogger("incident_correlator.processor")
@@ -80,6 +88,7 @@ class AnomalyProcessor:
         incident_topic: str = "incident.events",
         correlation_config: CorrelationConfig | None = None,
         severity_config: SeverityConfig | None = None,
+        topology_config: TopologyConfig | None = None,
         max_supersede_retries: int = 3,
     ) -> None:
         self._repo = repository
@@ -87,6 +96,7 @@ class AnomalyProcessor:
         self._incident_topic = incident_topic
         self._corr_cfg = correlation_config or CorrelationConfig()
         self._sev_cfg = severity_config or SeverityConfig()
+        self._topo_cfg = topology_config or TopologyConfig()
         self._max_retries = max_supersede_retries
 
     async def process(self, signal: AnomalySignal) -> ProcessOutcome:
@@ -125,6 +135,7 @@ class AnomalyProcessor:
                 await uow.add_transition(incident.id, transition)
                 published = (incident, "opened")
                 outcome = ProcessOutcome(ProcessResult.CREATED, incident.id, decision.reason)
+                current = incident
 
             elif decision.action is CorrelationAction.APPEND:
                 assert active is not None
@@ -136,6 +147,7 @@ class AnomalyProcessor:
                 change = "severity-changed" if active.severity != before else "evidence-added"
                 published = (active, change)
                 outcome = ProcessOutcome(ProcessResult.APPENDED, active.id, decision.reason)
+                current = active
 
             else:  # SUPERSEDE
                 assert active is not None
@@ -149,6 +161,12 @@ class AnomalyProcessor:
                 await uow.add_transition(incident.id, transition)
                 published = (incident, "opened")
                 outcome = ProcessOutcome(ProcessResult.SUPERSEDED, incident.id, decision.reason)
+                current = incident
+
+            # Phase 8: link this incident to concurrent incidents in adjacent
+            # services (a dependency or a dependent). Same transaction as the
+            # incident write, so a crash leaves no dangling half-link.
+            await self._link_related_incidents(current, uow)
 
         if published is not None:
             await self._publish(*published)
@@ -256,6 +274,57 @@ class AnomalyProcessor:
             severity_at_transition=incident.severity,
             created_at=now,
         )
+
+    async def _link_related_incidents(self, incident: Incident, uow: IncidentUnitOfWork) -> None:
+        """Find related incidents in dependent/dependency services and link them.
+
+        Deterministic: a static dependency graph (:mod:`incident_correlator.topology`)
+        + a fixed time window. The edge is always stored ``dependent -> dependency``
+        so the relation graph stays acyclic.
+        """
+
+        graph = self._topo_cfg.dependency_graph
+        neighbours = related_services(incident.service, graph)
+        if not neighbours:
+            return
+
+        window = self._topo_cfg.correlation_window_seconds
+        candidates = await uow.active_incidents_in_services(
+            sorted(neighbours), incident.environment
+        )
+        downstream = set(dependencies_of(incident.service, graph))
+        now = _now()
+        for other in candidates:
+            if other.id == incident.id:
+                continue
+            if not incidents_overlap(incident, other, window):
+                continue
+            if other.service in downstream:
+                dependent_id, dependency_id = incident.id, other.id
+                dependent_svc, dependency_svc = incident.service, other.service
+            else:
+                dependent_id, dependency_id = other.id, incident.id
+                dependent_svc, dependency_svc = other.service, incident.service
+            await uow.link_incident(
+                IncidentRelation(
+                    incident_id=dependent_id,
+                    related_incident_id=dependency_id,
+                    relation_type=IncidentRelationType.DEPENDENCY,
+                    reason=(
+                        f"{dependent_svc} depends on {dependency_svc}; "
+                        f"concurrent incidents within {window:.0f}s"
+                    ),
+                    created_at=now,
+                )
+            )
+            logger.info(
+                "linked cross-service incidents",
+                extra={
+                    "incident_id": dependent_id,
+                    "related_incident_id": dependency_id,
+                    "relation": IncidentRelationType.DEPENDENCY.value,
+                },
+            )
 
     async def _publish(self, incident: Incident, change: str) -> None:
         if self._producer is None or not self._producer.ready:
