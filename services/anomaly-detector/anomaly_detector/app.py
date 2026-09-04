@@ -1,7 +1,9 @@
 """anomaly-detector application factory.
 
-A thin FastAPI app (``/health``, ``/ready``, ``/metrics``) whose lifespan owns
-the scrape/score/publish loop (:class:`~anomaly_detector.runner.DetectorRunner`).
+A thin FastAPI app (``/health``, ``/ready``, ``/ready/stats``, ``/model-info``,
+``/metrics``) whose lifespan owns the scrape/score/publish loop
+(:class:`~anomaly_detector.runner.DetectorRunner`). ``/ready`` also carries an
+inference-statistics rollup and a degradation ``healthy`` flag (Phase 7C).
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from anomaly_detector import __version__
 from anomaly_detector.config import Settings, get_settings
 from anomaly_detector.metrics import get_metrics
 from anomaly_detector.runner import DetectorRunner
+from anomaly_detector.state import DetectorState, assess_health
 from anomaly_detector.training import ensure_detector, get_detector_source
 from sentinelops_common.kafka import KafkaJsonProducer, ensure_topics
 from sentinelops_common.obs import configure_observability, shutdown_observability
@@ -53,15 +56,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             mlflow_settings=settings.detector.mlflow,
         )
         app.state.detector = detector
+        metrics.set_model_info(version=detector.model_version, model_type=detector.model_type)
         logger.info("detector ready", extra=get_detector_source(detector))
         producer = KafkaJsonProducer(
             settings.kafka.bootstrap_servers, client_id=settings.kafka.client_id
         )
         client = httpx.AsyncClient(timeout=5.0)
+        state = DetectorState()
         runner = DetectorRunner(
-            settings, detector=detector, producer=producer, metrics=metrics, client=client
+            settings,
+            detector=detector,
+            producer=producer,
+            metrics=metrics,
+            client=client,
+            state=state,
         )
         app.state.runner = runner
+        app.state.detector_state = state
         try:
             if settings.kafka.auto_create_topics:
                 await ensure_topics(
@@ -92,23 +103,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/ready")
-    def ready(request: Request) -> Response:
+    def _readiness(request: Request) -> tuple[dict[str, object], bool]:
+        """Shared body for ``/ready`` and ``/ready/stats``: the ``(body, ok)`` pair
+        where ``ok`` drives the HTTP status (scoring loop alive), independent of
+        the softer ``healthy`` degradation signal."""
+
         runner = getattr(request.app.state, "runner", None)
         detector = getattr(request.app.state, "detector", None)
+        state: DetectorState | None = getattr(request.app.state, "detector_state", None)
         ok = runner is not None and runner.healthy and request.app.state.settings is not None
-        body = {
+
+        summary = state.get_summary() if state is not None else DetectorState().get_summary()
+        uptime = state.uptime_seconds() if state is not None else 0.0
+        health_cfg = request.app.state.settings.health
+        degraded_ok, reasons = assess_health(
+            summary,
+            uptime_seconds=uptime,
+            seconds_since_last_inference=(
+                state.seconds_since_last_inference() if state is not None else None
+            ),
+            max_idle_seconds=health_cfg.unhealthy_after_no_inference_seconds,
+            max_anomaly_rate=health_cfg.unhealthy_if_anomaly_rate_above,
+            max_avg_latency_ms=health_cfg.unhealthy_if_avg_latency_above_ms,
+        )
+        body: dict[str, object] = {
             "status": "ready" if ok else "not-ready",
             "model_loaded": detector is not None,
             "model_source": detector.source if detector is not None else "unknown",
             "model_version": detector.model_version if detector is not None else "unknown",
             "model_type": detector.model_type if detector is not None else "unknown",
+            "inference_stats": summary,
+            "uptime_seconds": round(uptime, 1),
+            "healthy": ok and degraded_ok,
+            "health_reasons": reasons,
         }
+        return body, ok
+
+    @app.get("/ready")
+    def ready(request: Request) -> Response:
+        body, ok = _readiness(request)
         return Response(
             json.dumps(body).encode(),
             status_code=200 if ok else 503,
             media_type="application/json",
         )
+
+    @app.get("/ready/stats")
+    def ready_stats(request: Request) -> Response:
+        body, _ = _readiness(request)
+        stats = {
+            "inference_stats": body["inference_stats"],
+            "uptime_seconds": body["uptime_seconds"],
+            "healthy": body["healthy"],
+            "health_reasons": body["health_reasons"],
+        }
+        return Response(json.dumps(stats).encode(), media_type="application/json")
 
     @app.get("/model-info")
     def model_info(request: Request) -> Response:

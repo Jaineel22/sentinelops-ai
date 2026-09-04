@@ -65,7 +65,9 @@ re-exports it. Payload contracts for cross-service events live in
 - **Payload:** `AnomalyDetectedV1` (`event_type = "anomaly.detected"`, v1) —
   detector + version, service, environment, window bounds, score/threshold,
   `is_anomaly`, the 11 operational `signals`, and coarse `abnormal_signals`
-  triage flags.
+  triage flags. Phase 7B adds optional best-effort `detection_latency_ms` /
+  `scrape_latency_ms` / `inference_latency_ms` for downstream debugging (never
+  correlation logic).
 - **Key:** `service` — all anomalies for one service share a partition and stay
   ordered ([ADR-018](../decisions/adr-018-kafka-partitioning-strategy.md)).
 - **DLQ:** `anomaly.events.dlq` — malformed payloads, unknown versions,

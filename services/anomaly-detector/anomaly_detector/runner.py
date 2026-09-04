@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import logging
 import time
+from dataclasses import replace
+from datetime import UTC, datetime
 
 import httpx
 from ml.data.schema import SIGNAL_COLUMNS
@@ -15,6 +17,8 @@ from anomaly_detector.config import Settings
 from anomaly_detector.events import anomaly_event
 from anomaly_detector.metrics import DetectorMetrics
 from anomaly_detector.metrics_source import MetricsSource, ScrapeError, SignalWindow
+from anomaly_detector.state import DetectorState
+from anomaly_detector.timing import DetectionTimeline, record_detection_timeline
 from sentinelops_common.kafka import KafkaJsonProducer
 from sentinelops_common.obs import get_tracer
 
@@ -30,11 +34,14 @@ class DetectorRunner:
         producer: KafkaJsonProducer,
         metrics: DetectorMetrics,
         client: httpx.AsyncClient,
+        state: DetectorState | None = None,
     ) -> None:
         self._settings = settings
         self._detector = detector
         self._producer = producer
         self._metrics = metrics
+        self._state = state or DetectorState()
+        self.state = self._state  # read-only handle for /ready
         self._source = MetricsSource(settings.detector.target_metrics_url, client=client)
         self._stop = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -82,22 +89,63 @@ class DetectorRunner:
             record: dict[str, object] = {c: window.signals[c] for c in SIGNAL_COLUMNS}
             record["window_start"] = window.window_start.isoformat()
             record["window_end"] = window.window_end.isoformat()
+            inference_started = time.perf_counter()
+            inference_start_ts = time.time()
             result = self._detector.score_window(record)
+            inference_latency = time.perf_counter() - inference_started
+            inference_end_ts = time.time()
             self.scored += 1
             self._metrics.windows_scored.add(1)
             self._metrics.score_duration.record(time.perf_counter() - started)
+            self._metrics.record_inference(
+                model_version=result.model_version,
+                latency_seconds=inference_latency,
+                is_anomaly=result.is_anomaly,
+                score=result.score,
+            )
+            self._metrics.record_service_inference(inference_latency, result.is_anomaly)
+            self._state.record_inference(
+                latency_seconds=inference_latency, is_anomaly=result.is_anomaly
+            )
             span.set_attribute("detector.is_anomaly", result.is_anomaly)
             span.set_attribute("detector.score", result.score)
 
-            if result.is_anomaly or not self._settings.detector.publish_only_anomalies:
-                await self._publish(window, result)
+            timeline = DetectionTimeline(
+                scrape_time=window.scrape_time.timestamp(),
+                window_close_time=window.window_end.timestamp(),
+                inference_start_time=inference_start_ts,
+                inference_end_time=inference_end_ts,
+                service=self._settings.detector.target_service,
+                is_anomaly=result.is_anomaly,
+            )
 
-    async def _publish(self, window: SignalWindow, result: AnomalyResult) -> None:
+            published = False
+            if result.is_anomaly or not self._settings.detector.publish_only_anomalies:
+                send_timeline = (
+                    replace(timeline, publish_time=time.time()) if result.is_anomaly else timeline
+                )
+                published = await self._publish(window, result, timeline=send_timeline)
+
+            if published and result.is_anomaly:
+                timeline = replace(timeline, publish_time=time.time())
+                self._metrics.record_detection_latency(
+                    (datetime.now(tz=UTC) - window.window_end).total_seconds()
+                )
+            record_detection_timeline(timeline, self._metrics)
+
+    async def _publish(
+        self,
+        window: SignalWindow,
+        result: AnomalyResult,
+        *,
+        timeline: DetectionTimeline | None = None,
+    ) -> bool:
         envelope = anomaly_event(
             window,
             result,
             service=self._settings.detector.target_service,
             environment=self._settings.detector.environment,
+            timeline=timeline,
         )
         try:
             await self._producer.publish(
@@ -108,7 +156,7 @@ class DetectorRunner:
         except Exception:
             self._metrics.publish_failures.add(1)
             logger.exception("failed to publish anomaly.detected")
-            return
+            return False
         self.published += 1
         self._metrics.anomalies_published.add(1)
         logger.info(
@@ -118,5 +166,8 @@ class DetectorRunner:
                 "score": result.score,
                 "threshold": result.threshold,
                 "abnormal_signals": envelope.payload["abnormal_signals"],
+                "detection_latency_ms": envelope.payload.get("detection_latency_ms"),
+                "inference_latency_ms": envelope.payload.get("inference_latency_ms"),
             },
         )
+        return True

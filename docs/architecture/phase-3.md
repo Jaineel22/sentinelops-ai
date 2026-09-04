@@ -64,9 +64,20 @@ standard event envelope (`event_type = "anomaly.detected"`, `event_version = 1`)
 | `is_anomaly` | bool | the detector's verdict |
 | `signals` | `{str: float}` | the 11 per-window operational signals (`ml.data.schema.SIGNAL_COLUMNS`) |
 | `abnormal_signals` | `[str]` | **coarse deterministic triage** — which signals are outside a fixed normal band. Not the detection decision; a cheap annotation so the correlator can name affected signals. |
+| `detection_latency_ms`, `scrape_latency_ms`, `inference_latency_ms` | float \| null | **Phase 7B**, optional, best-effort. The detection-latency breakdown for downstream debugging — never correlation logic. |
 
 Kafka key: `service` (ADR-018). Headers: `event-type`, `event-id`,
 `event-version`, plus `traceparent` for trace propagation.
+
+### `anomaly-detector` HTTP endpoints (`:8003`)
+
+| Method & path | Purpose |
+| --- | --- |
+| `GET /health` | liveness |
+| `GET /ready` | scoring loop alive (503 otherwise) + model provenance + **Phase 7C** `inference_stats` rollup, `uptime_seconds`, and a soft `healthy` / `health_reasons` degradation signal (never changes the status code) |
+| `GET /ready/stats` | just the `inference_stats` / `uptime_seconds` / `healthy` portion |
+| `GET /model-info` | active model source + registry details |
+| `GET /metrics` | Prometheus exposition (inference, detection-latency, and service-level aggregates — Phases 7A/7B/7C) |
 
 The correlator **rejects** (→ DLQ, no retry) an envelope whose `event_type` or
 `event_version` it does not speak, whose payload fails validation, or whose
