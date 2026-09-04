@@ -32,6 +32,12 @@ class AnomalyDetectedV1(BaseModel):
     signals: dict[str, float]
     # Coarse deterministic triage: which signals are outside their normal band.
     abnormal_signals: list[str] = Field(default_factory=list)
+    # Detection-latency breakdown (Phase 7B), milliseconds, best-effort. Present
+    # only when the detector captured a full timeline for this window; for
+    # downstream debugging, not correlation logic.
+    detection_latency_ms: float | None = None  # window close -> anomaly publish
+    scrape_latency_ms: float | None = None  # window close -> scrape
+    inference_latency_ms: float | None = None  # model scoring duration
 
 
 # --- incident lifecycle v1 --------------------------------------------

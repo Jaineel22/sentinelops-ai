@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import httpx
@@ -30,6 +30,9 @@ class SignalWindow:
     window_end: datetime
     dt_seconds: float
     signals: dict[str, float]
+    # Phase 7B: wall-clock instant the scrape that produced this window finished.
+    # Defaults to "now" so windows built in tests need not supply it.
+    scrape_time: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 class MetricsSource:
@@ -60,6 +63,7 @@ class MetricsSource:
         now = time.monotonic()
         wall = datetime.now(tz=UTC)
         snapshot = await self._scrape()
+        scraped_at = datetime.now(tz=UTC)  # after the scrape I/O completes
 
         prev, prev_at, prev_wall = self._prev, self._prev_at, self._prev_wall
         self._prev, self._prev_at, self._prev_wall = snapshot, now, wall
@@ -72,4 +76,10 @@ class MetricsSource:
         if signals is None:
             logger.warning("skipping invalid telemetry window (dt=%.3fs)", dt)
             return None
-        return SignalWindow(window_start=prev_wall, window_end=wall, dt_seconds=dt, signals=signals)
+        return SignalWindow(
+            window_start=prev_wall,
+            window_end=wall,
+            dt_seconds=dt,
+            signals=signals,
+            scrape_time=scraped_at,
+        )
