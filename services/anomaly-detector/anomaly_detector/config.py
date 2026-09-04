@@ -67,6 +67,21 @@ class DetectorSettings(BaseSettings):
         return base
 
 
+class HealthSettings(BaseSettings):
+    """Thresholds for the degraded-but-serving signal on ``/ready`` (Phase 7C).
+
+    These never change the HTTP status of ``/ready`` — that stays tied to the
+    scoring loop being alive. They only flip the ``healthy`` boolean / populate
+    ``health_reasons`` so an operator can see an instance is limping.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="HEALTH_", env_file=".env", extra="ignore")
+
+    unhealthy_after_no_inference_seconds: float = 300.0
+    unhealthy_if_anomaly_rate_above: float = 50.0  # percent
+    unhealthy_if_avg_latency_above_ms: float = 5000.0
+
+
 class OTelSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="OTEL_", env_file=".env", extra="ignore")
 
@@ -81,6 +96,7 @@ class Settings(BaseSettings):
     app: AppSettings = Field(default_factory=AppSettings)
     kafka: KafkaSettings = Field(default_factory=KafkaSettings)
     detector: DetectorSettings = Field(default_factory=DetectorSettings.from_env)
+    health: HealthSettings = Field(default_factory=HealthSettings)
     otel: OTelSettings = Field(default_factory=OTelSettings)
 
 
