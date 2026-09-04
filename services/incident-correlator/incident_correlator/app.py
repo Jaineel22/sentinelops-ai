@@ -76,6 +76,7 @@ def create_app(
         incident_topic=settings.kafka.incident_topic,
         correlation_config=settings.correlation,
         severity_config=settings.severity,
+        topology_config=settings.topology,
     )
     consumer = (
         AnomalyConsumer(settings, processor, dlq_producer=producer, metrics=metrics)
@@ -113,7 +114,10 @@ def create_app(
     app = FastAPI(
         title="incident-correlator",
         version=__version__,
-        summary="Correlates anomaly events into incidents with deterministic rules (Phase 3).",
+        summary=(
+            "Correlates anomaly events into incidents with deterministic rules "
+            "(Phase 3), and links incidents across dependent services (Phase 8)."
+        ),
         lifespan=lifespan,
     )
     app.state.settings = settings

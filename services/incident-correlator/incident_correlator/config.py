@@ -16,6 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from incident_correlator import SERVICE_NAME
 from incident_correlator.correlation import CorrelationConfig
 from incident_correlator.severity import SeverityConfig
+from incident_correlator.topology import TopologyConfig
 
 
 class AppSettings(BaseSettings):
@@ -69,6 +70,7 @@ class Settings(BaseSettings):
     otel: OTelSettings = Field(default_factory=OTelSettings)
     correlation: CorrelationConfig = Field(default_factory=CorrelationConfig)
     severity: SeverityConfig = Field(default_factory=SeverityConfig)
+    topology: TopologyConfig = Field(default_factory=TopologyConfig)
 
 
 @lru_cache

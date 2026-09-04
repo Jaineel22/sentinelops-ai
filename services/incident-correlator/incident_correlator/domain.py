@@ -26,6 +26,13 @@ class IncidentStatus(StrEnum):
 ACTIVE_STATUSES: frozenset[IncidentStatus] = frozenset(s for s in IncidentStatus if s.is_active)
 
 
+class IncidentRelationType(StrEnum):
+    """How two incidents are linked (Phase 8 — cross-service correlation)."""
+
+    DEPENDENCY = "dependency"  # a declared edge in the service-dependency graph
+    CROSS_SERVICE = "cross_service"  # generic concurrent cross-service link
+
+
 class Severity(StrEnum):
     INFO = "INFO"
     LOW = "LOW"
@@ -90,6 +97,17 @@ class EvidenceRecord:
     trace_id: str | None
     occurred_at: datetime
     correlation_reason: str
+
+
+@dataclass(frozen=True)
+class IncidentRelation:
+    """A directed link between two incidents (dependent -> dependency)."""
+
+    incident_id: str
+    related_incident_id: str
+    relation_type: IncidentRelationType
+    reason: str
+    created_at: datetime
 
 
 @dataclass
