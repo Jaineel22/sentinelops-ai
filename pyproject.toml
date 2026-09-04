@@ -93,6 +93,7 @@ dev = [
     "aiosqlite>=0.20",
     "ruff>=0.6",
     "mypy>=1.11",
+    "pyyaml>=6.0",  # Phase 7D: validate the Grafana / Prometheus config files
 ]
 
 [project.urls]
@@ -207,5 +208,6 @@ module = [
     "alembic.*",
     "langgraph.*",
     "langchain_core.*",
+    "yaml.*",
 ]
 ignore_missing_imports = true

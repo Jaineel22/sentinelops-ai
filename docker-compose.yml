@@ -29,9 +29,12 @@
 #
 #   - mlflow-init         one-shot: create the `mlflow` database on Postgres if missing
 #   - mlflow              MLflow tracking + model-registry server (Phase 6) — http://localhost:5000
+#   - prometheus          scrapes the anomaly-detector `/metrics` (Phase 7D) — http://localhost:9090
+#   - grafana             "Anomaly Detector - Inference & Performance" dashboard (Phase 7D) —
+#                         http://localhost:3000 (admin/admin)
 #
-# Dev-only Postgres credentials live in this file; never reuse them anywhere real.
-# No Redis / Prometheus / Grafana / Loki / Tempo yet — later phases.
+# Dev-only Postgres / Grafana credentials live in this file; never reuse them anywhere real.
+# No Redis / Loki / Tempo yet — later phases.
 
 services:
   api:
@@ -344,6 +347,61 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # --- Phase 7D: metrics backend + dashboards --------------------------------
+  # Prometheus scrapes the anomaly-detector's OTel->Prometheus `/metrics`
+  # (Phases 7A-7C); Grafana renders the provisioned "Anomaly Detector -
+  # Inference & Performance" dashboard. Nothing else depends on these; the app
+  # keeps running if they are down.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      anomaly-detector:
+        condition: service_started
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/monitoring/grafana/dashboards:/etc/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin # dev only — see file header
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: ""
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   mlflow-artifacts:
+  prometheus-data:
+  grafana-data:

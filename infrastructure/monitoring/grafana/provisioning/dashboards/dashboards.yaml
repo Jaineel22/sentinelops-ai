@@ -1,0 +1,17 @@
+# Grafana dashboard provisioning (Phase 7D).
+# Loads every *.json under the mounted dashboards directory on startup and keeps
+# it in sync (updateIntervalSeconds). docker-compose bind-mounts
+# infrastructure/monitoring/grafana/dashboards/ -> /etc/dashboards.
+apiVersion: 1
+
+providers:
+  - name: "sentinelops"
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/dashboards
+      foldersFromFilesStructure: true

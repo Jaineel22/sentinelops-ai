@@ -1,0 +1,15 @@
+# Grafana data source provisioning (Phase 7D).
+# Grafana reads this on startup; no manual "Add data source" step.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 5s
+      queryTimeout: 30s
