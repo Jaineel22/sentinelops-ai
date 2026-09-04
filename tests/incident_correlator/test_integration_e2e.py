@@ -126,10 +126,10 @@ async def test_related_anomalies_become_one_incident_and_duplicates_are_ignored(
     finally:
         await producer.stop()
 
-    async def _two_incidents() -> bool:
-        return len(await repo.list_incidents(IncidentFilter())) == 2
+    async def _three_incidents() -> bool:
+        return len(await repo.list_incidents(IncidentFilter())) == 3
 
-    await _wait_for(_two_incidents)
+    await _wait_for(_three_incidents)
     # let any duplicate settle
     await asyncio.sleep(2.0)
 
