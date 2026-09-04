@@ -1,8 +1,8 @@
 # SentinelOps AI
 
-> **Current status: Phase 7 — Real-Time ML Inference Observability (complete).**
-> Phases 0–7 are implemented and tested (see [Current status](#current-status)).
-> The full observability stack (Loki, Tempo, cross-service OTel) and Phase 8
+> **Current status: Phase 8 — Incident Engine: cross-service correlation (complete).**
+> Phases 0–8 are implemented and tested (see [Current status](#current-status)).
+> The full observability stack (Loki, Tempo, cross-service OTel) and Phase 9
 > (orchestration / cloud / IaC) under [Planned architecture](#planned-architecture)
 > and [Technology roadmap](#technology-roadmap) are future work and labelled as such.
 
@@ -75,13 +75,14 @@ the ML component ([ADR-002](docs/decisions/adr-002-ml-and-llm-separation.md)):
 
 ## Planned architecture
 
-> Target design. **Phases 0–6 exist and are tested** (the Kafka backbone,
+> Target design. **Phases 0–8 exist and are tested** (the Kafka backbone,
 > `orders-service`, live anomaly detection, incident correlation + PostgreSQL,
 > the LangGraph RCA agent, human-approved remediation with audit + recovery
-> verification, the MLflow-backed MLOps lifecycle, and real-time inference
-> observability with Prometheus + Grafana). The full observability stack (Loki,
-> Tempo, cross-service OTel collection) and orchestration / cloud / IaC (Phase 8)
-> are future work. See [Current status](#current-status).
+> verification, the MLflow-backed MLOps lifecycle, real-time inference
+> observability with Prometheus + Grafana, and cross-service incident
+> correlation). The full observability stack (Loki, Tempo, cross-service OTel
+> collection) and orchestration / cloud / IaC (Phase 9) are future work. See
+> [Current status](#current-status).
 
 ```mermaid
 flowchart LR
@@ -151,7 +152,8 @@ Introduced **only in the phase that needs it**, never earlier:
 | **5** | Human-approved, allow-listed remediation — closed action catalogue, LLM-free policy engine, human approval workflow/API, `LocalSimulationExecutor`, append-only audit trail, recovery verification, `remediation.events` Kafka lifecycle events | **done** |
 | **6** | MLOps lifecycle — MLflow experiment tracking + model registry, alias-based promotion (`champion`/`candidate`) through a deterministic gate, registry-backed inference, PSI drift detection, reproducible retraining workflow | **done** |
 | **7** | Real-Time ML Inference Observability — Prometheus metrics for the inference path, detection-latency timeline, enhanced `/ready`, 12-panel Grafana dashboard | **done** |
-| 8 | Kubernetes, cloud (AWS), Terraform, hardened CI/CD | planned |
+| **8** | Incident Engine — cross-service correlation via a static service-dependency graph; `incident_relations` table; linked incidents on the Incident API | **done** |
+| 9 | Kubernetes, cloud (AWS), Terraform, hardened CI/CD | planned |
 
 The roadmap is a direction, not a contract; later phases may re-scope earlier
 ones. See [docs/phases/roadmap.md](docs/phases/roadmap.md).
@@ -566,12 +568,48 @@ Details: [docs/architecture/phase-7.md](docs/architecture/phase-7.md) ·
 [docs/phase7-summary.md](docs/phase7-summary.md). Try it: `make phase7-verify`,
 or `docker compose up` then open `http://localhost:3000`.
 
+### Phase 8 — Incident Engine: cross-service correlation *(done)*
+
+Completes the incident engine. Phase 3 built deterministic anomaly→incident
+correlation, the PostgreSQL schema, the severity engine, the lifecycle state
+machine, and the Incident API. Phase 8 adds the layer
+[ADR-015](docs/decisions/adr-015-deterministic-anomaly-correlation.md) deferred:
+**correlation across services**.
+
+- **Static service-dependency graph** (`incident_correlator/topology.py`) —
+  `SERVICE_DEPENDENCY_GRAPH = {"orders-service": ["payments-service",
+  "inventory-service"]}`, overridable via the `SERVICE_DEPENDENCY_GRAPH` env var
+  (JSON). Pure, tested helpers: `dependencies_of`, `dependents_of`,
+  `related_services`, `incidents_overlap`, `find_related_incidents`,
+  `correlate_incidents`. No topology discovery, no trace-derived edges — a
+  static graph + a fixed window keeps linking reproducible.
+- **Transactional linking** — `AnomalyProcessor._link_related_incidents` runs in
+  the **same DB transaction** as the incident write, after every CREATE / APPEND
+  / SUPERSEDE (never a DUPLICATE): one indexed query for active incidents in
+  adjacent services, an interval-overlap check against
+  `CROSS_SERVICE_CORRELATION_WINDOW_SECONDS` (default 600 s), then an
+  `incident_relations` insert per edge — directed `dependent → dependency`, so
+  the relation graph stays acyclic. Deduped and race-safe (rides the existing
+  retry loop).
+- **`incident_relations` table** (migration `0002`, lineage `0001 → 0002`) —
+  composite PK, `relation_type` (`dependency` | `cross_service`), `reason`,
+  `ON DELETE CASCADE`, a no-self-link check, two directional indexes.
+- **Incident API** — `GET /incidents/{id}` gains a `related_incidents[]` array
+  (id / service / environment / status / severity / title / timestamps).
+  `IncidentRepository` gains `link_incidents(...)` and
+  `get_related_incidents(id)` on both the in-memory and SQL implementations.
+
+Same-service Phase 3 correlation is untouched; every existing test still passes.
+Details: [docs/architecture/phase-8.md](docs/architecture/phase-8.md) ·
+[docs/phase8-summary.md](docs/phase8-summary.md).
+
 **Not implemented** (later phases): the full observability stack — Loki (logs) /
 Tempo (traces) / an OTel collector / cross-service instrumentation beyond the
 anomaly-detector; Kubernetes, AWS, Terraform,
-hardened CI/CD (Phase 8); real-infrastructure remediation executors and
+hardened CI/CD (Phase 9); real-infrastructure remediation executors and
 autonomous remediation (out of scope by design —
 [ADR-003](docs/decisions/adr-003-human-in-the-loop-remediation.md));
 autonomous / scheduled retraining (Phase 6 is CLI-driven by design);
 authentication (the approver identity model is a demo, not auth);
-cross-service / topology-aware correlation.
+incident merging and topology **discovery** (Phase 8 links are advisory, over a
+hand-declared graph).

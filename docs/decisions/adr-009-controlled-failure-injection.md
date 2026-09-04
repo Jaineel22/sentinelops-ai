@@ -30,7 +30,7 @@ uncontrolled, and unrepeatable.
 
 - **A dedicated chaos tool (Toxiproxy, Chaos Mesh).** Powerful but heavy for
   Phase 1, and mostly targets network/infra rather than application-semantic
-  faults like "25% of orders fail validation downstream". Revisit for Phase 8.
+  faults like "25% of orders fail validation downstream". Revisit for Phase 9.
 - **Only env-var configuration (no runtime endpoint).** Reproducing a
   scenario sequence (normal → latency → recovery) then needs process restarts,
   which muddies the telemetry timeline. The guarded endpoint is worth it.

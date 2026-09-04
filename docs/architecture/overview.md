@@ -8,7 +8,7 @@ tracks what is actually built. It is updated at the end of every phase.
 - **IMPLEMENTED** — exists in the repository and is tested.
 - **PLANNED** — target design; no code yet.
 
-## Current state (through Phase 7)
+## Current state (through Phase 8)
 
 **IMPLEMENTED**
 
@@ -43,10 +43,15 @@ tracks what is actually built. It is updated at the end of every phase.
   surface for the anomaly-detector's inference path, a detection-latency
   timeline, an enhanced `/ready`, and a provisioned 12-panel Grafana dashboard
   (section 9).
+- **Phase 8:** the incident engine gains **cross-service correlation** — a
+  static service-dependency graph links a service's incident to concurrent
+  incidents in its dependencies (`incident_relations` table, `related_incidents`
+  on the Incident API), formed in the same transaction as the incident write
+  (section 11).
 
-See the per-phase docs. Sections 8 and 9 are implemented; section 10 (packaging /
-orchestration) and the deferred parts of 9 (Loki, Tempo, cross-service OTel) are
-**PLANNED**.
+See the per-phase docs. Sections 8, 9 and 11 are implemented; section 10
+(packaging / orchestration) and the deferred parts of 9 (Loki, Tempo,
+cross-service OTel) are **PLANNED**.
 
 ## Target architecture
 
@@ -333,6 +338,31 @@ real run. Full write-up: [phase-7.md](phase-7.md) ·
 rollout, **Loki** (logs), **Tempo** (traces), and an OTel Collector / Alloy
 collection pipeline.
 
+### 11. Incident engine — cross-service correlation — ✅ COMPLETE (Phase 8)
+
+**What Phase 8 delivers:** the incident engine (deterministic anomaly→incident
+correlation, the PostgreSQL schema, the severity engine, the state machine, the
+Incident API — all Phase 3) gains the layer ADR-015 deferred: **correlation
+across services**. `incident_correlator/topology.py` holds a static
+service-dependency graph (`SERVICE_DEPENDENCY_GRAPH`, default
+`{"orders-service": ["payments-service", "inventory-service"]}`, env-overridable).
+When a service and one of its declared dependencies both have an active incident
+within `CROSS_SERVICE_CORRELATION_WINDOW_SECONDS` (default 600 s),
+`AnomalyProcessor._link_related_incidents` — in the **same DB transaction** as
+the incident write, after every CREATE/APPEND/SUPERSEDE — records a directed
+`dependent → dependency` link in a new `incident_relations` table (Alembic
+migration `0002`, lineage `0001 → 0002`). Links are directional (acyclic),
+deduped, and race-safe; they surface on `GET /incidents/{id}` as
+`related_incidents[]` and feed the Phase 4 RCA agent. Deterministic and
+explainable — a static graph + a fixed window, **no topology discovery, no
+trace-derived edges**. Same-service Phase 3 correlation is unchanged; no new ADR.
+Full write-up: [phase-8.md](phase-8.md) · [phase8-summary.md](../phase8-summary.md).
+
+**Deferred:** discovery of the dependency graph from traces / service mesh /
+manifests; incident **merging** (links are advisory — no severity/status change,
+no `incident.linked` Kafka event); a generic (non-graph-edge) `cross_service`
+linker.
+
 ### 10. Packaging & delivery — PLANNED
 
 - **Docker** / **Docker Compose** for local multi-service development.
@@ -354,8 +384,9 @@ collection pipeline.
 | Approval + remediation + verification + audit + lifecycle events | 5 (done) |
 | MLflow tracking + registry + drift + retraining | 6 (done) |
 | Real-time ML inference observability (Prometheus + Grafana) | 7 (done) |
+| Incident engine — cross-service correlation (dependency graph, `incident_relations`) | 8 (done) |
 | Full observability stack (Loki, Tempo, OTel Collector, cross-service) | later |
-| Kubernetes + AWS + Terraform + hardened CI/CD | 8 |
+| Kubernetes + AWS + Terraform + hardened CI/CD | 9 |
 
 ## Repository layout rationale
 
@@ -368,7 +399,7 @@ collection pipeline.
 | `ml/` | ML anomaly-detection subsystem: collection, data, features, models, evaluation, experiments, inference (Phase 2). |
 | `artifacts/` | `reports/` (committed experiment results), `models/` (git-ignored). |
 | `scripts/` | Developer utilities: `generate_traffic.py`, `incident_scenario.py` (Phase 3 demo), `rca_scenario.py` / `rca_e2e_scenario.py` (Phase 4 demos), `remediation_e2e_scenario.py` (Phase 5 full-chain demo), `phase6_e2e_demo.py` (Phase 6), `phase7_verify.py` (Phase 7). |
-| `infrastructure/` | `monitoring/` — Prometheus scrape config + Grafana provisioning + dashboards (Phase 7). `kubernetes/`, `terraform/` are Phase 8. |
+| `infrastructure/` | `monitoring/` — Prometheus scrape config + Grafana provisioning + dashboards (Phase 7). `kubernetes/`, `terraform/` are Phase 9. |
 | `tests/` | Tests, one subpackage per component (`tests/orders_service/`, `tests/ml/`). |
 | `docs/` | `architecture/`, `decisions/` (ADRs), `development/`, `phases/`. |
 
@@ -382,4 +413,4 @@ production application, not a SentinelOps component. Empty directories are
 
 Packaging note: all Python currently ships as one distribution
 (`sentinelops-ai`) with multiple import packages. Splitting per-service
-packaging is a Phase 8 concern.
+packaging is a Phase 9 concern.

@@ -333,7 +333,33 @@ tests still pass (1056, 18 deselected); Ruff + format + mypy green; Compose
 config valid. Cross-service OTel rollout and Loki / Tempo / an OTel Collector are
 **not** in scope — deferred.
 
-## Phase 8 — Orchestration, cloud, IaC, hardened CI/CD — planned
+## Phase 8 — Incident Engine: cross-service correlation — done (2026-09-04)
+
+Completes the incident engine. Phase 3 built deterministic anomaly→incident
+correlation, the PostgreSQL schema, the severity engine, the lifecycle state
+machine, and the Incident API. Phase 8 adds the layer ADR-015 deferred:
+**cross-service correlation** via a static service-dependency graph
+(`incident_correlator/topology.py`, `SERVICE_DEPENDENCY_GRAPH`). When a service
+and one of its declared dependencies both have an active incident within
+`CROSS_SERVICE_CORRELATION_WINDOW_SECONDS` (default 600 s), the processor records
+a directed `dependent -> dependency` link in the same DB transaction as the
+incident write (`incident_relations` table, migration `0002`). Links surface on
+`GET /incidents/{id}` as `related_incidents[]` and feed the Phase 4 RCA agent.
+Deterministic and explainable — a static graph + a fixed window, no topology
+discovery. Details: [../architecture/phase-8.md](../architecture/phase-8.md) ·
+[../phase8-summary.md](../phase8-summary.md).
+
+**Exit criteria (met):** a static dependency graph with pure, tested helpers;
+cross-service links formed transactionally in `AnomalyProcessor` after
+CREATE/APPEND/SUPERSEDE (never DUPLICATE); the `incident_relations` table added
+via an Alembic migration with an up/down-tested lineage `0001 -> 0002`;
+`IncidentRelationType` in the domain; `GET /incidents/{id}` returns linked
+incidents; `link_incidents` / `get_related_incidents` on both repositories;
+directional (acyclic), deduped, race-safe linking; same-service Phase 3
+correlation and every existing test unchanged; Ruff + format + mypy green;
+no fabricated metrics.
+
+## Phase 9 — Orchestration, cloud, IaC, hardened CI/CD — planned
 
 Kubernetes manifests/Helm; AWS as target cloud; Terraform modules; CI/CD
 extended to build, scan, publish, and deploy.

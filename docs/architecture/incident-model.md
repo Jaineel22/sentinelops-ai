@@ -1,12 +1,14 @@
 # Incident data model
 
-The Phase 3 database schema. Owned by Alembic migrations
-(`services/incident-correlator/migrations/`); the initial revision is `0001`.
+The incident database schema — Phase 3 (`incidents`, `incident_evidence`,
+`incident_state_history`) plus Phase 8 (`incident_relations`). Owned by Alembic
+migrations (`services/incident-correlator/migrations/`); lineage `0001 → 0002`.
 JSON columns are `JSONB` on PostgreSQL, `JSON` on SQLite (unit tests).
 
-See also: [phase-3.md](phase-3.md) ·
+See also: [phase-3.md](phase-3.md) · [phase-8.md](phase-8.md) ·
 [ADR-014](../decisions/adr-014-postgresql-for-incident-state.md) ·
-[ADR-017](../decisions/adr-017-incident-state-machine.md).
+[ADR-017](../decisions/adr-017-incident-state-machine.md) ·
+[ADR-015](../decisions/adr-015-deterministic-anomaly-correlation.md).
 
 ---
 
@@ -97,6 +99,31 @@ A fresh incident always has an opening row `(null → OPEN, actor="system")`.
 
 ---
 
+## `incident_relations` (Phase 8)
+
+A directed link between two incidents in graph-adjacent services, stored
+`dependent → dependency` (e.g. `orders-service` → `payments-service`). Written by
+`AnomalyProcessor._link_related_incidents` in the same transaction as the
+incident write; see [phase-8.md](phase-8.md).
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `incident_id` | FK → `incidents.id` `ON DELETE CASCADE` | the **dependent** incident; part of the composite PK |
+| `related_incident_id` | FK → `incidents.id` `ON DELETE CASCADE` | the **dependency** incident; part of the composite PK |
+| `relation_type` | `varchar(32)` | `"dependency"` (graph edge) \| `"cross_service"` (reserved) |
+| `reason` | text | e.g. `"orders-service depends on payments-service; concurrent incidents within 600s"` |
+| `created_at` | `timestamptz` | |
+
+**Constraints:** composite PK `(incident_id, related_incident_id)`;
+`CHECK (incident_id <> related_incident_id)` (`ck_incident_relations_no_self`).
+**Indexes:** `ix_incident_relations_incident_id`,
+`ix_incident_relations_related_incident_id`.
+
+`GET /incidents/{id}` returns the incidents on the other end of these rows (both
+directions) under `related_incidents`. Re-inserting an existing edge is a no-op.
+
+---
+
 ## Lifecycle at a glance
 
 ```
@@ -104,6 +131,8 @@ anomaly.detected ─► CREATE  ─► incidents row (OPEN) + evidence row + his
                  ─► APPEND  ─► evidence row + aggregates recomputed + [history(severity-changed)]
                  ─► SUPERSEDE ─► old incident: history(→RESOLVED, "auto:stale"), resolved_at set
                                  new incident: as CREATE
+                 └─ then (Phase 8): incident_relations row per concurrent incident
+                    in a dependency / dependent service, within the cross-service window
 
 operator ─► POST /acknowledge ─► incidents.status=ACKNOWLEDGED, acknowledged_at set, history row
          ─► POST /resolve     ─► incidents.status=RESOLVED, resolved_at set, history row
