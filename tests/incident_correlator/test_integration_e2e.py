@@ -15,6 +15,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -41,13 +42,19 @@ pg = pytest.mark.skipif(_PG_URL is None, reason="set DB_TEST_URL to a Postgres D
 
 
 def _anomaly(service: str, *, offset: int, event_id: str | None = None) -> EventEnvelope:
+    # Windows a minute apart, anchored to "now" — a real detector publishes right
+    # after a window closes, so `occurred_at` tracks `window_end`. Correlation
+    # compares `occurred_at` against the active incident's `last_evidence_at`
+    # (which is a `window_end`); a hardcoded past date with `occurred_at`
+    # defaulting to now() makes every APPEND look stale (gap > window) and split.
+    window_end = datetime.now(tz=UTC) - timedelta(minutes=3 - offset)
     payload = AnomalyDetectedV1(
         detector="isolation_forest",
         detector_version="test",
         service=service,
         environment="development",
-        window_start=f"2026-09-01T12:{offset:02d}:00+00:00",
-        window_end=f"2026-09-01T12:{offset:02d}:10+00:00",
+        window_start=(window_end - timedelta(seconds=10)).isoformat(),
+        window_end=window_end.isoformat(),
         anomaly_score=0.9,
         threshold=0.5,
         is_anomaly=True,
@@ -59,6 +66,7 @@ def _anomaly(service: str, *, offset: int, event_id: str | None = None) -> Event
         event_type=ANOMALY_DETECTED,
         event_version=ANOMALY_DETECTED_VERSION,
         source="anomaly-detector",
+        occurred_at=window_end,
         payload=payload.model_dump(),
     )
 
@@ -126,10 +134,10 @@ async def test_related_anomalies_become_one_incident_and_duplicates_are_ignored(
     finally:
         await producer.stop()
 
-    async def _three_incidents() -> bool:
-        return len(await repo.list_incidents(IncidentFilter())) == 3
+    async def _two_incidents() -> bool:
+        return len(await repo.list_incidents(IncidentFilter())) == 2
 
-    await _wait_for(_three_incidents)
+    await _wait_for(_two_incidents)
     # let any duplicate settle
     await asyncio.sleep(2.0)
 
