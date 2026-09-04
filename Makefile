@@ -23,7 +23,8 @@ PY := $(BIN)/python
         db-migrate-rca run-rca rca-scenario rca-e2e-scenario docker-build-rca \
         db-migrate-remediation run-remediation remediation-e2e-scenario docker-build-remediation \
         mlops-retrain mlops-retrain-promote mlops-retrain-demo mlops-drift-retrain \
-        docker-build-mlflow phase6-demo phase6-summary
+        docker-build-mlflow phase6-demo phase6-summary \
+        phase7-verify phase7-summary
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -196,3 +197,14 @@ phase6-summary: ## Print the Phase 6 completion summary
 	@echo "ADRs: 031 (tracking+registry) . 032 (aliases) . 033 (promotion gate) . 034 (PSI drift)"
 	@echo "docs: docs/architecture/phase-6.md . docs/phase6-summary.md"
 	@echo "run 'make phase6-demo' (sqlite, no server) for end-to-end validation"
+
+# --- Phase 7: real-time ML inference observability -------------------
+phase7-verify: ## Phase 7 end-to-end verification (in-process; --url for a live detector)
+	$(PY) scripts/phase7_verify.py
+
+phase7-summary: ## Print the Phase 7 completion summary
+	@echo "=== Phase 7 - Real-Time ML Inference Observability (complete) ==="
+	@echo "7A inference metrics . 7B detection-latency timeline . 7C enhanced /ready + service aggregates"
+	@echo "7D Prometheus + Grafana (12-panel dashboard) . 7E docs + verification"
+	@echo "docs: docs/architecture/phase-7.md . docs/phase7-summary.md"
+	@echo "Grafana http://localhost:3000 (admin/admin) after 'docker compose up'; 'make phase7-verify'"

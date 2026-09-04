@@ -1,9 +1,10 @@
 # SentinelOps AI
 
-> **Current status: Phase 6 — MLOps lifecycle (complete).**
-> Phases 0–6 are implemented and tested (see [Current status](#current-status)).
-> Phases 7–8 under [Planned architecture](#planned-architecture) and
-> [Technology roadmap](#technology-roadmap) are future work and are labelled as such.
+> **Current status: Phase 7 — Real-Time ML Inference Observability (complete).**
+> Phases 0–7 are implemented and tested (see [Current status](#current-status)).
+> The full observability stack (Loki, Tempo, cross-service OTel) and Phase 8
+> (orchestration / cloud / IaC) under [Planned architecture](#planned-architecture)
+> and [Technology roadmap](#technology-roadmap) are future work and labelled as such.
 
 ## What it is
 
@@ -77,20 +78,22 @@ the ML component ([ADR-002](docs/decisions/adr-002-ml-and-llm-separation.md)):
 > Target design. **Phases 0–6 exist and are tested** (the Kafka backbone,
 > `orders-service`, live anomaly detection, incident correlation + PostgreSQL,
 > the LangGraph RCA agent, human-approved remediation with audit + recovery
-> verification, and the MLflow-backed MLOps lifecycle). The deployed
-> observability stack (Phase 7) and orchestration / cloud / IaC (Phase 8) are
-> future work. See [Current status](#current-status).
+> verification, the MLflow-backed MLOps lifecycle, and real-time inference
+> observability with Prometheus + Grafana). The full observability stack (Loki,
+> Tempo, cross-service OTel collection) and orchestration / cloud / IaC (Phase 8)
+> are future work. See [Current status](#current-status).
 
 ```mermaid
 flowchart LR
   subgraph Sources["Instrumented services"]
     S1[orders-service]
-    S2["more services (Phase 7)"]
+    S2["more services (later)"]
   end
 
-  S1 & S2 -->|OpenTelemetry| COL["OTel Collector / Alloy (Phase 7)"]
-  COL --> OBS[("Prometheus / Loki / Tempo (Phase 7)")]
+  S1 & S2 -->|OpenTelemetry| COL["OTel Collector / Alloy (later)"]
+  COL --> OBS[("Loki / Tempo (later)")]
   S1 -->|metrics scrape| AD["anomaly-detector (ML)"]
+  AD -->|/metrics OTel→Prom| PROM[("Prometheus + Grafana (Phase 7)")]
 
   AD -->|anomaly.detected| K[(Apache Kafka)]
   K --> CORR["incident-correlator (rules)"]
@@ -111,7 +114,6 @@ flowchart LR
   VERIFY -->|remediation.events| K
 
   MLF["MLflow (Phase 6)"] -.model aliases.-> AD
-  GRAF["Grafana (Phase 7)"] --- OBS
 ```
 
 ## Technology roadmap
@@ -123,10 +125,11 @@ Introduced **only in the phase that needs it**, never earlier:
 | Backend | Python, FastAPI |
 | ML | scikit-learn, pandas, NumPy; XGBoost / PyTorch only if justified (not used) |
 | MLOps | MLflow (experiment tracking + model registry with **aliases, not stages**); PSI drift detection; a deterministic promotion gate + retraining workflow ([Phase 6](#phase-6--mlops-lifecycle-done)) |
+| ML inference observability | OpenTelemetry → Prometheus metrics for the inference path, a detection-latency timeline, an enhanced `/ready`, and a 12-panel Grafana dashboard ([Phase 7](docs/architecture/phase-7.md)) |
 | AI agent | LangGraph (or an equivalent explicit state-machine agent), an LLM API, tool calling |
 | Data | PostgreSQL; Redis where justified |
 | Messaging | Apache Kafka (event backbone) |
-| Observability | OpenTelemetry, Prometheus, Loki, Tempo, Grafana (Alloy/OTel collection, not Promtail) |
+| Observability | OpenTelemetry + Prometheus + Grafana (live, Phase 7); Loki, Tempo, Alloy/OTel-collection later (not Promtail) |
 | Datasets | HDFS, BGL, NAB for offline experimentation/evaluation — evaluated **separately** from live synthetic telemetry ([ADR-004](docs/decisions/adr-004-datasets-vs-live-telemetry.md)) |
 | Containers | Docker, Docker Compose |
 | Orchestration | Kubernetes |
@@ -147,7 +150,7 @@ Introduced **only in the phase that needs it**, never earlier:
 | **4** | AI RCA agent — LangGraph investigation, controlled read-only evidence tools, mock/live LLM boundary, Investigation API | **done** |
 | **5** | Human-approved, allow-listed remediation — closed action catalogue, LLM-free policy engine, human approval workflow/API, `LocalSimulationExecutor`, append-only audit trail, recovery verification, `remediation.events` Kafka lifecycle events | **done** |
 | **6** | MLOps lifecycle — MLflow experiment tracking + model registry, alias-based promotion (`champion`/`candidate`) through a deterministic gate, registry-backed inference, PSI drift detection, reproducible retraining workflow | **done** |
-| 7 | Observability stack (OpenTelemetry, Prometheus, Loki, Tempo, Grafana) | planned |
+| **7** | Real-Time ML Inference Observability — Prometheus metrics for the inference path, detection-latency timeline, enhanced `/ready`, 12-panel Grafana dashboard | **done** |
 | 8 | Kubernetes, cloud (AWS), Terraform, hardened CI/CD | planned |
 
 The roadmap is a direction, not a contract; later phases may re-scope earlier
@@ -526,8 +529,46 @@ Details: [docs/architecture/phase-6.md](docs/architecture/phase-6.md) ·
 [docs/phase6-summary.md](docs/phase6-summary.md). Try it:
 `MLFLOW_TRACKING_URI=sqlite:///mlruns/mlflow.db make phase6-demo`.
 
-**Not implemented** (later phases): a deployed observability stack — Prometheus /
-Loki / Tempo / Grafana / an OTel collector (Phase 7); Kubernetes, AWS, Terraform,
+### Phase 7 — Real-Time ML Inference Observability *(done)*
+
+The anomaly-detector's scrape → score → publish loop goes from a black box to a
+fully observed path. No detection logic changed; every number is from a real run.
+
+- **Prometheus inference metrics (7A)** — `DetectorMetrics` gains an inference
+  view recorded per scored window: `detector_inference_requests_total`,
+  `detector_inference_duration_seconds` (real sub-second buckets),
+  `detector_anomalies_detected_total`, `detector_anomaly_score` distribution, and
+  observable `detector_model_{version,type,info}` gauges. Exported at
+  `GET /metrics` via the OTel → Prometheus exporter (ADR-007) — service name is a
+  resource attribute, `model_version` the only per-metric label.
+- **Detection-latency timeline (7B)** — `anomaly_detector/timing.py` keeps a
+  per-cycle `DetectionTimeline` (scrape → window-close → inference → publish) and
+  derives `detector_window_age_at_scrape_seconds`,
+  `detector_scrape_to_publish_seconds`, and
+  `detector_detection_latency_end_to_end_seconds`. The same breakdown rides on
+  the `anomaly.detected` payload (`detection_latency_ms` / `scrape_latency_ms` /
+  `inference_latency_ms`) — debug metadata, never correlation logic.
+- **Enhanced `/ready` (7C)** — a thread-safe `DetectorState` rollup
+  (`inference_stats`: counts, anomaly rate, EMA / min / max latency, last
+  inference time), `uptime_seconds`, and a soft `healthy` / `health_reasons`
+  degradation signal (`HEALTH_` thresholds — never changes the HTTP status). The
+  existing `status` / `model_*` fields are unchanged; `GET /ready/stats` returns
+  just the rollup. Service-level aggregate metrics (`detector_service_*`) too.
+- **Prometheus + Grafana (7D)** — `docker compose up` starts `prometheus`
+  (`:9090`, scrapes the detector every 5 s) and `grafana` (`:3000`, `admin`/`admin`)
+  with an auto-provisioned data source and a **12-panel** "Anomaly Detector —
+  Inference & Performance" dashboard (`infrastructure/monitoring/`).
+- **Verification (7E)** — `scripts/phase7_verify.py` (`make phase7-verify`)
+  checks the whole surface in-process or `--url` against a live detector;
+  `tests/infrastructure/` statically validates the dashboard + config.
+
+Details: [docs/architecture/phase-7.md](docs/architecture/phase-7.md) ·
+[docs/phase7-summary.md](docs/phase7-summary.md). Try it: `make phase7-verify`,
+or `docker compose up` then open `http://localhost:3000`.
+
+**Not implemented** (later phases): the full observability stack — Loki (logs) /
+Tempo (traces) / an OTel collector / cross-service instrumentation beyond the
+anomaly-detector; Kubernetes, AWS, Terraform,
 hardened CI/CD (Phase 8); real-infrastructure remediation executors and
 autonomous remediation (out of scope by design —
 [ADR-003](docs/decisions/adr-003-human-in-the-loop-remediation.md));

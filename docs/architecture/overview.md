@@ -8,7 +8,7 @@ tracks what is actually built. It is updated at the end of every phase.
 - **IMPLEMENTED** — exists in the repository and is tested.
 - **PLANNED** — target design; no code yet.
 
-## Current state (through Phase 6)
+## Current state (through Phase 7)
 
 **IMPLEMENTED**
 
@@ -36,9 +36,17 @@ tracks what is actually built. It is updated at the end of every phase.
   verifier (5F), and best-effort `remediation.events` Kafka lifecycle events
   published after each committed transition (5G). Human approval is mandatory;
   no real infrastructure is touched.
+- **Phase 6:** MLflow experiment tracking + model registry (alias-based
+  promotion through a deterministic gate), registry-backed inference, PSI drift
+  detection, reproducible retraining workflow (section 8).
+- **Phase 7:** real-time ML inference observability — a Prometheus metric
+  surface for the anomaly-detector's inference path, a detection-latency
+  timeline, an enhanced `/ready`, and a provisioned 12-panel Grafana dashboard
+  (section 9).
 
-See the per-phase docs. Section 8 (MLOps lifecycle) is implemented; sections
-9–10 below are **PLANNED**.
+See the per-phase docs. Sections 8 and 9 are implemented; section 10 (packaging /
+orchestration) and the deferred parts of 9 (Loki, Tempo, cross-service OTel) are
+**PLANNED**.
 
 ## Target architecture
 
@@ -46,9 +54,10 @@ See the per-phase docs. Section 8 (MLOps lifecycle) is implemented; sections
 
 Small services emit telemetry (metrics, logs, traces) via **OpenTelemetry**.
 `orders-service` is the first — a demo app under observation, with built-in
-fault injection to generate production-like scenarios. More services, and an
-OpenTelemetry Collector / **Grafana Alloy** collection pipeline (not Promtail),
-are planned for Phase 7.
+fault injection to generate production-like scenarios. Phase 7 stood up
+**Prometheus + Grafana** and instrumented the anomaly-detector's inference path
+(see §9). A cross-service OpenTelemetry Collector / **Grafana Alloy** pipeline
+(not Promtail) plus Loki / Tempo remain future work.
 
 ### 2. Event backbone — PARTIALLY IMPLEMENTED (Phase 1)
 
@@ -302,10 +311,27 @@ Phase 6 is **complete** — see [phase-6.md § 10](phase-6.md) for the exit-crit
 checklist. Full write-up: [phase-6.md](phase-6.md) ·
 [phase6-summary.md](../phase6-summary.md).
 
-### 9. Observability stack — PLANNED
+### 9. Real-time ML inference observability — ✅ COMPLETE (Phase 7)
 
-**Prometheus** (metrics), **Loki** (logs), **Tempo** (traces), **Grafana**
-(dashboards), all fed through OpenTelemetry.
+**What Phase 7 delivers:** the anomaly-detector's inference loop is instrumented
+end to end and rendered live. Sub-phases: **7A** a purpose-built Prometheus
+metric surface (inference throughput, a latency histogram with real sub-second
+buckets, anomaly count + score distribution, live model version/type) recorded
+per scored window and exported at `GET /metrics` (OTel → Prometheus, ADR-007) ·
+**7B** a per-cycle detection-latency timeline (window-age-at-scrape /
+scrape-to-publish / end-to-end) as histograms and on the `anomaly.detected`
+payload · **7C** an enhanced `/ready` — an in-process `DetectorState` statistics
+rollup, `uptime_seconds`, a soft `healthy` / `health_reasons` degradation signal
+(never changes the HTTP status), `GET /ready/stats`, and service-level aggregate
+metrics · **7D** Prometheus (`:9090`) + Grafana (`:3000`, auto-provisioned data
+source + a 12-panel dashboard) in Docker Compose · **7E** `scripts/phase7_verify.py`
+(`make phase7-verify`) + docs. No detection logic changed; every number is from a
+real run. Full write-up: [phase-7.md](phase-7.md) ·
+[phase7-summary.md](../phase7-summary.md).
+
+**Deferred (the roadmap's original "full stack"):** cross-service OpenTelemetry
+rollout, **Loki** (logs), **Tempo** (traces), and an OTel Collector / Alloy
+collection pipeline.
 
 ### 10. Packaging & delivery — PLANNED
 
@@ -327,7 +353,8 @@ checklist. Full write-up: [phase-6.md](phase-6.md) ·
 | AI RCA agent + evidence tools | 4 (done) |
 | Approval + remediation + verification + audit + lifecycle events | 5 (done) |
 | MLflow tracking + registry + drift + retraining | 6 (done) |
-| Observability stack | 7 |
+| Real-time ML inference observability (Prometheus + Grafana) | 7 (done) |
+| Full observability stack (Loki, Tempo, OTel Collector, cross-service) | later |
 | Kubernetes + AWS + Terraform + hardened CI/CD | 8 |
 
 ## Repository layout rationale
@@ -340,8 +367,8 @@ checklist. Full write-up: [phase-6.md](phase-6.md) ·
 | `libs/sentinelops_common/` | Shared library: Kafka event envelope, JSON logging + OpenTelemetry setup, JSON producer, idempotent consumer. |
 | `ml/` | ML anomaly-detection subsystem: collection, data, features, models, evaluation, experiments, inference (Phase 2). |
 | `artifacts/` | `reports/` (committed experiment results), `models/` (git-ignored). |
-| `scripts/` | Developer utilities: `generate_traffic.py`, `incident_scenario.py` (Phase 3 demo), `rca_scenario.py` / `rca_e2e_scenario.py` (Phase 4 demos), `remediation_e2e_scenario.py` (Phase 5 full-chain demo). |
-| `infrastructure/` | `docker/`, `kubernetes/`, `terraform/` (Phase 7-8). |
+| `scripts/` | Developer utilities: `generate_traffic.py`, `incident_scenario.py` (Phase 3 demo), `rca_scenario.py` / `rca_e2e_scenario.py` (Phase 4 demos), `remediation_e2e_scenario.py` (Phase 5 full-chain demo), `phase6_e2e_demo.py` (Phase 6), `phase7_verify.py` (Phase 7). |
+| `infrastructure/` | `monitoring/` — Prometheus scrape config + Grafana provisioning + dashboards (Phase 7). `kubernetes/`, `terraform/` are Phase 8. |
 | `tests/` | Tests, one subpackage per component (`tests/orders_service/`, `tests/ml/`). |
 | `docs/` | `architecture/`, `decisions/` (ADRs), `development/`, `phases/`. |
 

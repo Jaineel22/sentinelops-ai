@@ -328,6 +328,50 @@ Schema changes: edit `services/rca-agent/rca_agent/db/models.py`, then
 `cd services/rca-agent && alembic revision --autogenerate -m "..."` (its own
 `alembic_version_rca` lineage), review, `make db-migrate-rca`.
 
+## 9c. Phase 7: inference metrics + Grafana dashboard
+
+`docker compose up --build` now also starts **Prometheus** (`:9090`) and
+**Grafana** (`:3000`). Prometheus scrapes the anomaly-detector's `/metrics`
+every 5 s; Grafana auto-provisions its data source and the
+**"Anomaly Detector - Inference & Performance"** dashboard.
+
+```bash
+docker compose up -d --build kafka orders-service anomaly-detector prometheus grafana
+
+# drive some inference traffic so the panels fill in
+python scripts/generate_traffic.py --scenario sequence --duration 60 --rate 6
+
+curl -s http://localhost:8003/ready | python -m json.tool          # inference_stats rollup (7C)
+curl -s http://localhost:8003/ready/stats | python -m json.tool    # just the stats
+curl -s http://localhost:9090/api/v1/targets | python -m json.tool # anomaly-detector = up
+```
+
+**Grafana:** <http://localhost:3000> — user `admin`, password `admin` (dev only).
+Dashboards → Browse → *Anomaly Detector - Inference & Performance*.
+
+| Panel | Shows |
+| --- | --- |
+| Inference Requests / sec · Anomalies Detected / sec | throughput (`rate(...[1m])`) |
+| Inference Latency (p50/p95/p99) | model scoring latency percentiles |
+| End-to-End Detection Latency (p95) | window-close → anomaly-published (7B) |
+| Anomaly Score Distribution | histogram heatmap of raw scores |
+| Current Model Version / Type | `detector_model_info` labels (7A) |
+| Total Inferences / Anomalies · Anomaly Rate % | range aggregates (green <10 %, red >25 %) |
+| Service Uptime · Latest Inference Latency | `process_start_time_seconds`, mean 5 m latency |
+
+Verify the whole surface (in-process, needs no Docker) or against the running
+service:
+
+```bash
+make phase7-verify                                                  # in-process
+python scripts/phase7_verify.py --url http://localhost:8003 \
+    --grafana-url http://localhost:3000                             # live
+```
+
+The metric surface is documented in
+[docs/architecture/phase-7.md](../architecture/phase-7.md) ·
+[docs/phase7-summary.md](../phase7-summary.md).
+
 ## 10. Lint, format, type-check
 
 ```bash

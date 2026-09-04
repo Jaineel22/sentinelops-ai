@@ -300,10 +300,38 @@ run and passes evaluation before promotion; existing inference + Phase 0–5 tes
 still pass; Ruff + format + mypy green; Compose valid; a reproducible end-to-end
 demo; no secrets; no fabricated metrics; no Phase 7/8 functionality.
 
-## Phase 7 — Observability stack — planned
+## Phase 7 — Real-Time ML Inference Observability — done (2026-09-04)
 
-OpenTelemetry instrumentation across services; Prometheus, Loki, Tempo, Grafana
-(Alloy/OTel collection, not Promtail).
+Instruments the **anomaly-detector's inference path** end to end and stands up
+**Prometheus + Grafana**. All sub-phases done:
+**7A** Prometheus inference metrics — a `DetectorMetrics` inference view
+(requests, latency histogram with real buckets, anomalies, score distribution,
+live model provenance) recorded per scored window, exported at `GET /metrics`
+(OTel → Prometheus, ADR-007) · **7B** detection-latency timeline — a per-cycle
+`DetectionTimeline` (scrape → window-close → inference → publish) yielding a
+window-age / scrape-to-publish / end-to-end breakdown as histograms **and** on
+the `anomaly.detected` payload (debug metadata, never correlation logic) · **7C**
+enhanced `/ready` — a thread-safe `DetectorState` rollup (counts, EMA latency,
+min/max, uptime) + a soft `healthy` / `health_reasons` degradation signal
+(`HEALTH_` thresholds; never changes the HTTP status) + `GET /ready/stats` +
+service-level aggregate metrics · **7D** Prometheus (`:9090`, scrapes the
+detector every 5 s) + Grafana (`:3000`, auto-provisioned data source + a 12-panel
+"Anomaly Detector — Inference & Performance" dashboard) in Docker Compose · **7E**
+`scripts/phase7_verify.py` (`make phase7-verify`), static dashboard/config tests,
+and this documentation pass. `docs/architecture/phase-7.md`,
+[docs/phase7-summary.md](../phase7-summary.md).
+
+**Exit criteria (met):** the inference path exposes a purpose-built Prometheus
+metric surface (throughput, latency percentiles from real buckets, anomaly rate,
+end-to-end detection latency, model version/type); `/ready` carries an
+inference-statistics rollup + `uptime_seconds` + a `healthy` flag without
+breaking the existing contract; the detection-latency breakdown rides on the
+event payload; a Prometheus scrapes the detector and a provisioned Grafana
+dashboard renders every panel from real data (verified with `docker compose up`);
+no detection logic changed; no fabricated metrics; existing inference + Phase 0–6
+tests still pass (1056, 18 deselected); Ruff + format + mypy green; Compose
+config valid. Cross-service OTel rollout and Loki / Tempo / an OTel Collector are
+**not** in scope — deferred.
 
 ## Phase 8 — Orchestration, cloud, IaC, hardened CI/CD — planned
 
