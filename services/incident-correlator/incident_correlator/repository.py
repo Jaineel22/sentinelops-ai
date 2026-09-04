@@ -24,6 +24,8 @@ from incident_correlator.domain import (
     ACTIVE_STATUSES,
     EvidenceRecord,
     Incident,
+    IncidentRelation,
+    IncidentRelationType,
     IncidentStatus,
     Severity,
     StateTransition,
@@ -58,11 +60,28 @@ class IncidentUnitOfWork(Protocol):
 
     async def add_transition(self, incident_id: str, transition: StateTransition) -> None: ...
 
+    async def active_incidents_in_services(
+        self, services: list[str], environment: str
+    ) -> list[Incident]: ...
+
+    async def link_incident(self, relation: IncidentRelation) -> None: ...
+
 
 class IncidentRepository(Protocol):
     def unit_of_work(self) -> AbstractAsyncContextManager[IncidentUnitOfWork]: ...
 
     async def get_incident(self, incident_id: str) -> Incident | None: ...
+
+    async def get_related_incidents(self, incident_id: str) -> list[Incident]: ...
+
+    async def link_incidents(
+        self,
+        incident_id: str,
+        related_incident_id: str,
+        relation_type: str,
+        *,
+        reason: str = "",
+    ) -> None: ...
 
     async def get_active_incident(self, correlation_key: str) -> Incident | None: ...
 
@@ -139,6 +158,29 @@ class _InMemoryUoW:
         snapshot = copy.deepcopy(transition)
         self._ops.append(lambda: self._store.incidents[incident_id].history.append(snapshot))
 
+    async def active_incidents_in_services(
+        self, services: list[str], environment: str
+    ) -> list[Incident]:
+        wanted = set(services)
+        return [
+            copy.deepcopy(inc)
+            for inc in self._store.incidents.values()
+            if inc.service in wanted
+            and inc.environment == environment
+            and inc.status in ACTIVE_STATUSES
+        ]
+
+    async def link_incident(self, relation: IncidentRelation) -> None:
+        snapshot = copy.deepcopy(relation)
+
+        def _apply() -> None:
+            key = (snapshot.incident_id, snapshot.related_incident_id)
+            if any((r.incident_id, r.related_incident_id) == key for r in self._store.relations):
+                return
+            self._store.relations.append(snapshot)
+
+        self._ops.append(_apply)
+
     def commit(self) -> None:
         for op in self._ops:
             op()
@@ -148,11 +190,12 @@ class _InMemoryUoW:
 class _Store:
     incidents: dict[str, Incident]
     evidence_ids: set[str]
+    relations: list[IncidentRelation]
 
 
 class InMemoryIncidentRepository:
     def __init__(self) -> None:
-        self._store = _Store(incidents={}, evidence_ids=set())
+        self._store = _Store(incidents={}, evidence_ids=set(), relations=[])
 
     @asynccontextmanager
     async def unit_of_work(self) -> AsyncIterator[IncidentUnitOfWork]:
@@ -169,6 +212,42 @@ class InMemoryIncidentRepository:
             if inc.correlation_key == correlation_key and inc.status in ACTIVE_STATUSES:
                 return copy.deepcopy(inc)
         return None
+
+    async def get_related_incidents(self, incident_id: str) -> list[Incident]:
+        related_ids: list[str] = []
+        for rel in self._store.relations:
+            if rel.incident_id == incident_id:
+                related_ids.append(rel.related_incident_id)
+            elif rel.related_incident_id == incident_id:
+                related_ids.append(rel.incident_id)
+        out = [
+            copy.deepcopy(self._store.incidents[rid])
+            for rid in related_ids
+            if rid in self._store.incidents
+        ]
+        out.sort(key=lambda i: i.created_at, reverse=True)
+        return out
+
+    async def link_incidents(
+        self,
+        incident_id: str,
+        related_incident_id: str,
+        relation_type: str,
+        *,
+        reason: str = "",
+    ) -> None:
+        key = (incident_id, related_incident_id)
+        if any((r.incident_id, r.related_incident_id) == key for r in self._store.relations):
+            return
+        self._store.relations.append(
+            IncidentRelation(
+                incident_id=incident_id,
+                related_incident_id=related_incident_id,
+                relation_type=IncidentRelationType(relation_type),
+                reason=reason,
+                created_at=datetime.now(tz=UTC),
+            )
+        )
 
     async def list_incidents(self, flt: IncidentFilter) -> list[Incident]:
         rows = [copy.deepcopy(i) for i in self._store.incidents.values()]

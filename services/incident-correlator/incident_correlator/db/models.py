@@ -120,6 +120,33 @@ class EvidenceRow(Base):
     )
 
 
+class IncidentRelationRow(Base):
+    """A directed link between two incidents (Phase 8 — cross-service correlation).
+
+    The row is stored ``dependent -> dependency`` (``orders-service`` ->
+    ``payments-service``). A composite primary key + a no-self-link check keep the
+    relation graph free of duplicates and trivial cycles.
+    """
+
+    __tablename__ = "incident_relations"
+
+    incident_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("incidents.id", ondelete="CASCADE"), primary_key=True
+    )
+    related_incident_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("incidents.id", ondelete="CASCADE"), primary_key=True
+    )
+    relation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_incident_relations_incident_id", "incident_id"),
+        Index("ix_incident_relations_related_incident_id", "related_incident_id"),
+        CheckConstraint("incident_id <> related_incident_id", name="ck_incident_relations_no_self"),
+    )
+
+
 class StateHistoryRow(Base):
     __tablename__ = "incident_state_history"
 

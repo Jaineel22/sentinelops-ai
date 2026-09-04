@@ -18,10 +18,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from incident_correlator.db.engine import Database
-from incident_correlator.db.models import EvidenceRow, IncidentRow, StateHistoryRow
+from incident_correlator.db.models import (
+    EvidenceRow,
+    IncidentRelationRow,
+    IncidentRow,
+    StateHistoryRow,
+)
 from incident_correlator.domain import (
     EvidenceRecord,
     Incident,
+    IncidentRelation,
+    IncidentRelationType,
     IncidentStatus,
     Severity,
     StateTransition,
@@ -211,6 +218,48 @@ class _SqlUoW:
             await self._s.rollback()
             raise DuplicateActiveIncidentError(f"evidence {evidence.event_id}") from exc
 
+    async def active_incidents_in_services(
+        self, services: list[str], environment: str
+    ) -> list[Incident]:
+        if not services:
+            return []
+        rows = (
+            await self._s.scalars(
+                select(IncidentRow).where(
+                    IncidentRow.service.in_(services),
+                    IncidentRow.environment == environment,
+                    IncidentRow.status.in_(_ACTIVE_SQL),
+                )
+            )
+        ).all()
+        return [_row_to_incident(r, with_children=False) for r in rows]
+
+    async def link_incident(self, relation: IncidentRelation) -> None:
+        exists = await self._s.scalar(
+            select(IncidentRelationRow.incident_id).where(
+                IncidentRelationRow.incident_id == relation.incident_id,
+                IncidentRelationRow.related_incident_id == relation.related_incident_id,
+            )
+        )
+        if exists is not None:
+            return
+        self._s.add(
+            IncidentRelationRow(
+                incident_id=relation.incident_id,
+                related_incident_id=relation.related_incident_id,
+                relation_type=str(relation.relation_type),
+                reason=relation.reason,
+                created_at=relation.created_at,
+            )
+        )
+        try:
+            await self._s.flush()
+        except IntegrityError as exc:  # concurrent insert of the same edge
+            await self._s.rollback()
+            raise DuplicateActiveIncidentError(
+                f"relation {relation.incident_id}->{relation.related_incident_id}"
+            ) from exc
+
     async def add_transition(self, incident_id: str, transition: StateTransition) -> None:
         self._s.add(
             StateHistoryRow(
@@ -263,6 +312,50 @@ class SqlIncidentRepository:
                 .limit(1)
             )
             return _row_to_incident(row, with_children=False) if row is not None else None
+
+    async def get_related_incidents(self, incident_id: str) -> list[Incident]:
+        async with self._db.session() as session:
+            forward = await session.scalars(
+                select(IncidentRelationRow.related_incident_id).where(
+                    IncidentRelationRow.incident_id == incident_id
+                )
+            )
+            backward = await session.scalars(
+                select(IncidentRelationRow.incident_id).where(
+                    IncidentRelationRow.related_incident_id == incident_id
+                )
+            )
+            ids = set(forward.all()) | set(backward.all())
+            if not ids:
+                return []
+            rows = (
+                await session.scalars(
+                    select(IncidentRow)
+                    .where(IncidentRow.id.in_(ids))
+                    .order_by(IncidentRow.created_at.desc())
+                )
+            ).all()
+            return [_row_to_incident(r, with_children=False) for r in rows]
+
+    async def link_incidents(
+        self,
+        incident_id: str,
+        related_incident_id: str,
+        relation_type: str,
+        *,
+        reason: str = "",
+    ) -> None:
+        async with self._db.session() as session, session.begin():
+            uow = _SqlUoW(session)
+            await uow.link_incident(
+                IncidentRelation(
+                    incident_id=incident_id,
+                    related_incident_id=related_incident_id,
+                    relation_type=IncidentRelationType(relation_type),
+                    reason=reason,
+                    created_at=datetime.now(tz=UTC),
+                )
+            )
 
     async def list_incidents(self, flt: IncidentFilter) -> list[Incident]:
         stmt = select(IncidentRow).order_by(IncidentRow.created_at.desc())
