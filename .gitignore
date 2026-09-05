@@ -48,6 +48,13 @@ ml/data/raw/
 artifacts/models/
 artifacts/data/
 
+# --- Frontend (apps/frontend, Phase 10) ---
+node_modules/
+apps/frontend/.next/
+apps/frontend/out/
+apps/frontend/next-env.d.ts
+*.tsbuildinfo
+
 # --- IDE / editor ---
 .vscode/
 .idea/

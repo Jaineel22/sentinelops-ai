@@ -3,6 +3,9 @@
 .venv
 .venv-*
 venv
+node_modules
+apps/frontend/.next
+apps/frontend/out
 __pycache__
 *.py[cod]
 .pytest_cache

@@ -32,6 +32,8 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.25",
     "opentelemetry-exporter-prometheus>=0.46b0",
     "prometheus-client>=0.20",
+    # Phase 10.1: JWT auth for the platform API (apps/api) only.
+    "pyjwt>=2.9",
 ]
 
 [project.optional-dependencies]
@@ -158,6 +160,7 @@ extend-exclude = [
     "services/incident-correlator/migrations",
     "services/rca-agent/migrations",
     "services/remediation-controller/migrations",
+    "apps/frontend",
 ]
 
 [tool.ruff.lint]
@@ -191,6 +194,7 @@ exclude = [
     "services/incident-correlator/migrations/",
     "services/rca-agent/migrations/",
     "services/remediation-controller/migrations/",
+    "apps/frontend/",
 ]
 
 [[tool.mypy.overrides]]

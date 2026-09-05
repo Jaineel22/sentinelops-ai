@@ -43,6 +43,9 @@ services:
       - "8000:8000"
     environment:
       APP_ENV: development
+      # Phase 10.1: JWT auth for the frontend's login screen (demo-grade, see
+      # apps/api/sentinelops_api/auth.py). Override for anything but local dev.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-insecure-secret-change-me}
     restart: unless-stopped
 
   kafka:
@@ -286,6 +289,33 @@ services:
         condition: service_healthy
       orders-service:
         condition: service_started
+    restart: unless-stopped
+
+  # --- Phase 10: frontend MVP (Next.js operator dashboard) -------------------
+  # Read-mostly dashboard over the incident / RCA / remediation / detector APIs
+  # plus the human remediation-approval flow. No auth (internal services). Next
+  # server-side rewrites proxy the four backends under a same-origin /api/*, so
+  # there is no CORS requirement and no backend change. http://localhost:3100
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    ports:
+      - "3100:3000"
+    environment:
+      INCIDENT_API_URL: http://incident-correlator:8000
+      RCA_API_URL: http://rca-agent:8000
+      REMEDIATION_API_URL: http://remediation-controller:8000
+      DETECTOR_API_URL: http://anomaly-detector:8000
+      # Phase 10.1: the dashboard's JWT login (apps/api, /api/v1/auth/*).
+      AUTH_API_URL: http://api:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      - api
+      - incident-correlator
+      - rca-agent
+      - remediation-controller
+      - anomaly-detector
     restart: unless-stopped
 
   # --- Phase 6: MLflow (experiment tracking + model registry) ----------------
