@@ -33,7 +33,7 @@ propagation — [ADR-008](adr-008-events-vs-telemetry.md)).
   target for a learning project. Rejected in favour of the Apache image.
 - **`confluent-kafka` (librdkafka)**: fastest and most "production", but a
   blocking API that needs `run_in_executor` wrapping throughout. Revisit if
-  Phase 9 load testing shows aiokafka is the bottleneck.
+  Phase 11 load testing shows aiokafka is the bottleneck.
 - **`kafka-python`**: pure-Python but slower-moving; aiokafka is the async
   evolution of the same lineage.
 - **Redpanda**: single binary, Kafka-compatible, pleasant locally. Deferred —
