@@ -1,8 +1,9 @@
 """FastAPI application entry point.
 
-Phase 0 only: this module wires up the application and exposes a health check
-and a root informational endpoint. It deliberately contains no authentication,
-messaging, persistence, ML, or agent logic.
+Phase 0: health check + a root informational endpoint. Phase 10.1 adds JWT
+auth (``/api/v1/auth/*``) for the operator dashboard's login screen — see
+``sentinelops_api.auth``. Everything else deliberately contains no messaging,
+persistence, ML, or agent logic; those live in ``services/``.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 
 from sentinelops_api import __version__
 from sentinelops_api.config import Settings, get_settings
+from sentinelops_api.routes.auth import router as auth_router
 
 
 class HealthResponse(BaseModel):
@@ -55,6 +57,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             phase="0 - Repository & Development Foundation",
             docs="/docs",
         )
+
+    app.include_router(auth_router)
 
     return app
 
