@@ -1,5 +1,10 @@
 # Phase 4 — AI RCA / investigation layer
 
+> This is the authoritative engineering write-up for the RCA agent. In the
+> project's blueprint numbering it is **Phase 9** — see
+> [phase-9.md](phase-9.md) for the Phase 9 summary and close-out
+> (`make phase9-verify`). No functionality differs between the two.
+
 Phase 3 produces deterministic incidents. Phase 4 turns each one into an
 **evidence-backed, explainable root-cause analysis** performed by a controlled
 AI investigation agent.

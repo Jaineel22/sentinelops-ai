@@ -24,10 +24,12 @@ PY := $(BIN)/python
         db-migrate-remediation run-remediation remediation-e2e-scenario docker-build-remediation \
         mlops-retrain mlops-retrain-promote mlops-retrain-demo mlops-drift-retrain \
         docker-build-mlflow phase6-demo phase6-summary \
-        phase7-verify phase7-summary
+        phase7-verify phase7-summary \
+        phase9-verify phase9-summary \
+        frontend-install frontend-dev frontend-build frontend-lint phase10-summary
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
 
 venv: ## Create the virtual environment
 	python -m venv $(VENV)
@@ -128,6 +130,18 @@ rca-scenario: ## Deterministic in-process demo: one incident -> investigation ->
 rca-e2e-scenario: ## Deterministic full-chain demo: incident.opened (Kafka shape) -> RCA -> API
 	$(PY) scripts/rca_e2e_scenario.py
 
+# --- Phase 9: AI Root Cause Agent (blueprint numbering; built as Phase 4) ---
+phase9-verify: ## Phase 9 verification: drives the mock + full-chain RCA scenarios (--url for a live API)
+	$(PY) scripts/phase9_verify.py
+
+phase9-summary: ## Print the Phase 9 completion summary
+	@echo "=== Phase 9 - AI Root Cause Agent (complete) ==="
+	@echo "LangGraph investigation engine, closed read-only evidence tools, mock/live LLM boundary"
+	@echo "initialize -> plan -> collect -> analyze -> verify -> synthesize -> validate; the LLM proposes, code decides"
+	@echo "ADRs: 019 (service+boundary) . 020 (read-only tools) . 021 (LLM boundary+injection) . 022 (live provider) . 023 (integration)"
+	@echo "docs: docs/architecture/phase-9.md . docs/architecture/phase-4.md . docs/phase9-summary.md"
+	@echo "run 'make phase9-verify' (mock, no key) to verify"
+
 # --- Phase 5: human-approved remediation ------------------------------
 db-migrate-remediation: ## Apply remediation-controller DB migrations (needs Postgres up)
 	cd services/remediation-controller && DB_URL=$(DB_URL) $(abspath $(BIN))/alembic upgrade head
@@ -208,3 +222,23 @@ phase7-summary: ## Print the Phase 7 completion summary
 	@echo "7D Prometheus + Grafana (12-panel dashboard) . 7E docs + verification"
 	@echo "docs: docs/architecture/phase-7.md . docs/phase7-summary.md"
 	@echo "Grafana http://localhost:3000 (admin/admin) after 'docker compose up'; 'make phase7-verify'"
+
+# --- Phase 10: frontend MVP (Next.js operator dashboard) --------------
+frontend-install: ## Install the frontend's npm dependencies
+	cd apps/frontend && npm install
+
+frontend-dev: ## Run the frontend dev server (http://localhost:3100)
+	cd apps/frontend && npm run dev
+
+frontend-build: ## Production build of the frontend (Next standalone)
+	cd apps/frontend && npm run build
+
+frontend-lint: ## Lint + type-check the frontend (next lint + tsc --noEmit)
+	cd apps/frontend && npm run lint && npm run typecheck
+
+phase10-summary: ## Print the Phase 10 completion summary
+	@echo "=== Phase 10 - Frontend MVP (complete) ==="
+	@echo "Next.js 15 / React 19 / Tailwind operator dashboard: incidents, RCA report, human remediation approval, model perf"
+	@echo "No auth (internal services); server-side proxy to :8002/:8003/:8004/:8005; no backend changes"
+	@echo "docs: docs/architecture/phase-10.md . docs/phase10-summary.md . apps/frontend/README.md"
+	@echo "run 'make frontend-dev' (needs the backend up) or 'docker compose up frontend' (http://localhost:3100)"

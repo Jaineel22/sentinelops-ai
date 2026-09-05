@@ -8,7 +8,7 @@ tracks what is actually built. It is updated at the end of every phase.
 - **IMPLEMENTED** — exists in the repository and is tested.
 - **PLANNED** — target design; no code yet.
 
-## Current state (through Phase 8)
+## Current state (through Phase 10)
 
 **IMPLEMENTED**
 
@@ -48,8 +48,20 @@ tracks what is actually built. It is updated at the end of every phase.
   incidents in its dependencies (`incident_relations` table, `related_incidents`
   on the Incident API), formed in the same transaction as the incident write
   (section 11).
+- **Phase 9:** the **AI Root Cause Agent** — built in the implementation as
+  Phase 4; Phase 9 is the blueprint's number and the formal close-out (docs +
+  `scripts/phase9_verify.py`, no new features). The controlled LangGraph
+  investigation engine, the closed read-only evidence-tool registry, the
+  mock/live LLM boundary, and the Investigation API (section 5).
+- **Phase 10:** `apps/frontend/` — a Next.js operator dashboard over the
+  existing internal APIs (incidents, RCA report, the human remediation-approval
+  flow, model provenance). A server-side proxy stands in for a gateway.
+  **Phase 10.1** adds a JWT login gate (`apps/api` gains
+  `/api/v1/auth/*`) + RBAC in the dashboard UI, a frontend CI job, and
+  auto-refresh — the incident/RCA/remediation/detector services underneath
+  remain unauthenticated by design (section 12).
 
-See the per-phase docs. Sections 8, 9 and 11 are implemented; section 10
+See the per-phase docs. Sections 5, 8, 9, 11 and 12 are implemented; section 10
 (packaging / orchestration) and the deferred parts of 9 (Loki, Tempo,
 cross-service OTel) are **PLANNED**.
 
@@ -111,7 +123,14 @@ Incident API (`:8002`) serves queries and manual lifecycle transitions, and
 `incident.*` lifecycle events are published for Phase 4. **Redis** was
 considered and not needed (ADR-014). See [phase-3.md](phase-3.md).
 
-### 5. AI RCA agent — IMPLEMENTED (Phase 4)
+### 5. AI RCA agent — IMPLEMENTED (Phase 4; formally closed as Phase 9)
+
+**What Phase 9 delivers:** nothing new — it is the blueprint's number for the
+RCA agent the implementation built as Phase 4, plus a documentation +
+verification close-out (`docs/architecture/phase-9.md`,
+[phase9-summary.md](../phase9-summary.md), `scripts/phase9_verify.py` /
+`make phase9-verify`). The engineering detail below and in
+[phase-4.md](phase-4.md) is unchanged.
 
 `services/rca-agent` reacts to the Phase 3 `incident.opened` Kafka event and runs
 an explicit **LangGraph** investigation state machine
@@ -136,7 +155,7 @@ API (`POST /investigations`, `GET /investigations/{id}` and `/steps`,
 `GET /incidents/{id}/investigation`) exposes their state, trace, and report;
 `docker compose up` runs the whole chain with no API key
 ([ADR-023](../decisions/adr-023-rca-agent-integration.md)). See
-[phase-4.md](phase-4.md) ·
+[phase-4.md](phase-4.md) · [phase-9.md](phase-9.md) ·
 [ADR-002](../decisions/adr-002-ml-and-llm-separation.md) ·
 [ADR-019](../decisions/adr-019-rca-agent-service-and-boundary.md).
 
@@ -363,6 +382,44 @@ manifests; incident **merging** (links are advisory — no severity/status chang
 no `incident.linked` Kafka event); a generic (non-graph-edge) `cross_service`
 linker.
 
+### 12. Frontend MVP — ✅ COMPLETE (Phase 10, incl. 10.1 hardening)
+
+**What Phase 10 delivers:** `apps/frontend/` (Next.js 15 / React 19 / Tailwind),
+a read-mostly **operator dashboard** over the existing internal APIs. Dashboard
+(incident counts + live detector stats), incident list (filterable) + detail
+(evidence, lifecycle history, section-11 cross-service related incidents,
+acknowledge/resolve), the **RCA report** (section 5, with a "start
+investigation" action), the **human remediation-approval flow** (section 6/7 —
+approve/reject with an explicit approver identity/role/reason, then execute
+with a dry-run toggle, showing policy/approval/execution/verification), and a
+Models page (live provenance + inference stats from the anomaly-detector).
+TypeScript types mirror the backend Pydantic response shapes field-for-field.
+
+The incident/RCA/remediation/detector services have no CORS and no `/api/v1`
+gateway; rather than add CORS middleware everywhere, `next.config.mjs`
+**server-side rewrites** proxy them under one same-origin `/api/*` — no
+cross-origin request, no change to those four services.
+
+**What Phase 10.1 delivers:** `apps/api` (previously just `/health` + `/`)
+gains real JWT auth — `/api/v1/auth/{login,me,register}`
+(`sentinelops_api.auth`; PyJWT, PBKDF2-HMAC hashing, an in-memory demo user
+store, role hierarchy `viewer < approver < admin`) — and the dashboard gains a
+login page + an `AuthGuard` that blocks every route until the token validates.
+Approve/reject/execute and acknowledge/resolve render only for `approver`+.
+**Scope boundary:** the incident/RCA/remediation/detector services *still*
+don't check the token — only `apps/api`'s new routes and the dashboard UI are
+protected; a direct API call bypasses the login exactly as in Phase 10
+(ADR-003: those services are internal by design). Also: a `frontend` CI job
+(`.github/workflows/ci.yml`) and auto-refresh (dashboard 10s, incident detail
+15s, remediation panel 15s, toggleable). Full write-up: [phase-10.md](phase-10.md)
+§9 · [phase10-summary.md](../phase10-summary.md).
+
+**Deferred:** authenticating the incident/RCA/remediation/detector services
+themselves (explicit Phase 10.1 scope boundary, above); persisted user
+accounts / refresh tokens; MLflow metrics / PSI drift in the UI
+(CLI/MLflow-server only); proposing remediations from the UI; frontend unit
+tests.
+
 ### 10. Packaging & delivery — PLANNED
 
 - **Docker** / **Docker Compose** for local multi-service development.
@@ -380,26 +437,29 @@ linker.
 | Kafka + first instrumented service | 1 (done) |
 | ML anomaly detection + offline evaluation | 2 (done, offline) |
 | Incident correlation + PostgreSQL | 3 (done) |
-| AI RCA agent + evidence tools | 4 (done) |
+| AI RCA agent + evidence tools | 4 / 9 (done — built as 4, closed as 9) |
 | Approval + remediation + verification + audit + lifecycle events | 5 (done) |
 | MLflow tracking + registry + drift + retraining | 6 (done) |
 | Real-time ML inference observability (Prometheus + Grafana) | 7 (done) |
 | Incident engine — cross-service correlation (dependency graph, `incident_relations`) | 8 (done) |
+| AI Root Cause Agent (formal close-out of the Phase 4 build) | 9 (done) |
+| Frontend MVP — Next.js operator dashboard over the internal APIs | 10 (done) |
 | Full observability stack (Loki, Tempo, OTel Collector, cross-service) | later |
-| Kubernetes + AWS + Terraform + hardened CI/CD | 9 |
+| Kubernetes + AWS + Terraform + hardened CI/CD | 11 |
 
 ## Repository layout rationale
 
 | Path | Purpose |
 | --- | --- |
-| `apps/api/` | The SentinelOps platform API (Phase 0). |
+| `apps/api/` | The SentinelOps platform API (Phase 0); gained JWT auth for the frontend's login screen (Phase 10.1). |
 | `apps/orders-service/` | Demo app under observation (Phase 1). |
+| `apps/frontend/` | Next.js operator dashboard, JWT login (Phase 10.1), server-side API proxy (Phase 10). |
 | `services/` | SentinelOps-internal event processors — `anomaly-detector` (live scoring) and `incident-correlator` (correlation + persistence + Incident API), Phase 3; `rca-agent` (AI investigation + Investigation API), Phase 4; `remediation-controller` (RCA→proposal mapping, policy, human approval API, `LocalSimulationExecutor`, audit trail, recovery verification, `remediation.events` publisher), Phase 5. |
 | `libs/sentinelops_common/` | Shared library: Kafka event envelope, JSON logging + OpenTelemetry setup, JSON producer, idempotent consumer. |
 | `ml/` | ML anomaly-detection subsystem: collection, data, features, models, evaluation, experiments, inference (Phase 2). |
 | `artifacts/` | `reports/` (committed experiment results), `models/` (git-ignored). |
-| `scripts/` | Developer utilities: `generate_traffic.py`, `incident_scenario.py` (Phase 3 demo), `rca_scenario.py` / `rca_e2e_scenario.py` (Phase 4 demos), `remediation_e2e_scenario.py` (Phase 5 full-chain demo), `phase6_e2e_demo.py` (Phase 6), `phase7_verify.py` (Phase 7). |
-| `infrastructure/` | `monitoring/` — Prometheus scrape config + Grafana provisioning + dashboards (Phase 7). `kubernetes/`, `terraform/` are Phase 9. |
+| `scripts/` | Developer utilities: `generate_traffic.py`, `incident_scenario.py` (Phase 3 demo), `rca_scenario.py` / `rca_e2e_scenario.py` (Phase 4 demos), `remediation_e2e_scenario.py` (Phase 5 full-chain demo), `phase6_e2e_demo.py` (Phase 6), `phase7_verify.py` (Phase 7), `phase9_verify.py` (Phase 9). |
+| `infrastructure/` | `monitoring/` — Prometheus scrape config + Grafana provisioning + dashboards (Phase 7). `kubernetes/`, `terraform/` are Phase 11. |
 | `tests/` | Tests, one subpackage per component (`tests/orders_service/`, `tests/ml/`). |
 | `docs/` | `architecture/`, `decisions/` (ADRs), `development/`, `phases/`. |
 
@@ -413,4 +473,4 @@ production application, not a SentinelOps component. Empty directories are
 
 Packaging note: all Python currently ships as one distribution
 (`sentinelops-ai`) with multiple import packages. Splitting per-service
-packaging is a Phase 9 concern.
+packaging is a Phase 11 concern.

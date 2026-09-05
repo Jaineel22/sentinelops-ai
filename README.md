@@ -1,8 +1,8 @@
 # SentinelOps AI
 
-> **Current status: Phase 8 — Incident Engine: cross-service correlation (complete).**
-> Phases 0–8 are implemented and tested (see [Current status](#current-status)).
-> The full observability stack (Loki, Tempo, cross-service OTel) and Phase 9
+> **Current status: Phase 10 — Frontend MVP, incl. 10.1 auth/RBAC/CI hardening (complete).**
+> Phases 0–10 are implemented and tested (see [Current status](#current-status)).
+> The full observability stack (Loki, Tempo, cross-service OTel) and Phase 11
 > (orchestration / cloud / IaC) under [Planned architecture](#planned-architecture)
 > and [Technology roadmap](#technology-roadmap) are future work and labelled as such.
 
@@ -75,14 +75,14 @@ the ML component ([ADR-002](docs/decisions/adr-002-ml-and-llm-separation.md)):
 
 ## Planned architecture
 
-> Target design. **Phases 0–8 exist and are tested** (the Kafka backbone,
+> Target design. **Phases 0–10 exist and are tested** (the Kafka backbone,
 > `orders-service`, live anomaly detection, incident correlation + PostgreSQL,
-> the LangGraph RCA agent, human-approved remediation with audit + recovery
-> verification, the MLflow-backed MLOps lifecycle, real-time inference
-> observability with Prometheus + Grafana, and cross-service incident
-> correlation). The full observability stack (Loki, Tempo, cross-service OTel
-> collection) and orchestration / cloud / IaC (Phase 9) are future work. See
-> [Current status](#current-status).
+> cross-service incident correlation, the LangGraph RCA agent, human-approved
+> remediation with audit + recovery verification, the MLflow-backed MLOps
+> lifecycle, real-time inference observability with Prometheus + Grafana, and a
+> Next.js operator dashboard). The full observability stack (Loki, Tempo,
+> cross-service OTel collection) and orchestration / cloud / IaC (Phase 11) are
+> future work. See [Current status](#current-status).
 
 ```mermaid
 flowchart LR
@@ -115,6 +115,11 @@ flowchart LR
   VERIFY -->|remediation.events| K
 
   MLF["MLflow (Phase 6)"] -.model aliases.-> AD
+
+  FE["Frontend dashboard :3100<br/>(Phase 10, Next.js, JWT login)"] -->|server-side proxy| CORR
+  FE --> AGENT
+  FE --> REM
+  FE --> AD
 ```
 
 ## Technology roadmap
@@ -137,7 +142,7 @@ Introduced **only in the phase that needs it**, never earlier:
 | Cloud | AWS |
 | IaC | Terraform |
 | CI/CD | GitHub Actions |
-| Frontend | React / Next.js (or another justified modern choice) |
+| Frontend | Next.js / React / Tailwind — operator dashboard ([Phase 10](docs/architecture/phase-10.md)) |
 | Testing | pytest, integration tests, later load testing |
 
 ## Project phases
@@ -148,12 +153,14 @@ Introduced **only in the phase that needs it**, never earlier:
 | **1** | Event backbone (Kafka) + a first instrumented service emitting telemetry | **done** |
 | **2** | ML anomaly-detection pipeline + offline evaluation (real metrics) | **done** |
 | **3** | Incident correlation + persistence (deterministic rules, PostgreSQL, Incident API) | **done** |
-| **4** | AI RCA agent — LangGraph investigation, controlled read-only evidence tools, mock/live LLM boundary, Investigation API | **done** |
+| **4** | AI RCA agent — LangGraph investigation, controlled read-only evidence tools, mock/live LLM boundary, Investigation API (formally closed out as **Phase 9**) | **done** |
 | **5** | Human-approved, allow-listed remediation — closed action catalogue, LLM-free policy engine, human approval workflow/API, `LocalSimulationExecutor`, append-only audit trail, recovery verification, `remediation.events` Kafka lifecycle events | **done** |
 | **6** | MLOps lifecycle — MLflow experiment tracking + model registry, alias-based promotion (`champion`/`candidate`) through a deterministic gate, registry-backed inference, PSI drift detection, reproducible retraining workflow | **done** |
 | **7** | Real-Time ML Inference Observability — Prometheus metrics for the inference path, detection-latency timeline, enhanced `/ready`, 12-panel Grafana dashboard | **done** |
 | **8** | Incident Engine — cross-service correlation via a static service-dependency graph; `incident_relations` table; linked incidents on the Incident API | **done** |
-| 9 | Kubernetes, cloud (AWS), Terraform, hardened CI/CD | planned |
+| **9** | AI Root Cause Agent — the Phase 4 build ([phase-9.md](docs/architecture/phase-9.md)): LangGraph investigation engine, closed read-only evidence tools, mock/live LLM boundary, Investigation API + `incident.opened` consumer | **done** |
+| **10** | Frontend MVP — Next.js/React/Tailwind operator dashboard ([phase-10.md](docs/architecture/phase-10.md)): incident list/detail, evidence, cross-service links, RCA report, human remediation approval, model provenance; **10.1** adds JWT login + RBAC (`apps/api`), a frontend CI job, and auto-refresh | **done** |
+| 11 | Kubernetes, cloud (AWS), Terraform, hardened CI/CD | planned |
 
 The roadmap is a direction, not a contract; later phases may re-scope earlier
 ones. See [docs/phases/roadmap.md](docs/phases/roadmap.md).
@@ -603,13 +610,89 @@ Same-service Phase 3 correlation is untouched; every existing test still passes.
 Details: [docs/architecture/phase-8.md](docs/architecture/phase-8.md) ·
 [docs/phase8-summary.md](docs/phase8-summary.md).
 
+### Phase 9 — AI Root Cause Agent *(done)*
+
+The RCA agent was **implemented as Phase 4**; Phase 9 is the blueprint's number
+and the formal close-out (docs + `scripts/phase9_verify.py`). **No new
+features.** Full detail lives in the [Phase 4](#phase-4--ai-rca--investigation-agent-done)
+section above and in [docs/architecture/phase-9.md](docs/architecture/phase-9.md).
+
+- **Closed read-only evidence tools** — 6 AVAILABLE (`get_incident`,
+  `get_incident_timeline`, `get_anomaly_evidence`, `get_related_incidents`,
+  `get_service_metrics`, `get_service_health`) + 4 registered-but-UNAVAILABLE
+  (logs, traces, deployments, dependency graph — surfaced honestly, never
+  fabricated).
+- **Bounded LangGraph engine** — `initialize → plan → collect → analyze → verify
+  → synthesize → validate`, one bounded re-analysis + one synthesis repair, then
+  a guaranteed-valid `INSUFFICIENT_EVIDENCE` fallback. `RCA_*` budgets checked
+  every node. **The LLM proposes; deterministic code decides.**
+- **Mock / live LLM** — `RCA_MODE=mock` (default, CI, no key) drives the real
+  graph deterministically; `RCA_MODE=live LLM_PROVIDER=anthropic` makes one
+  forced-tool-use call per operation. Never a silent mock fallback.
+- **Investigation API + Kafka** — `incident.opened` → idempotent consumer →
+  investigation; `POST /investigations`, `GET /investigations/{id}`,
+  `GET /incidents/{id}/investigation`. The recommended action always requires
+  human approval — Phase 5 owns execution.
+
+Verify: `make phase9-verify` (mock, in-process — drives the mock RCA scenario and
+the full `incident.opened → consumer → RCA → API` chain and checks the structured
+report). `tests/rca_agent/` — 269 tests. Details:
+[docs/architecture/phase-9.md](docs/architecture/phase-9.md) ·
+[docs/phase9-summary.md](docs/phase9-summary.md).
+
+### Phase 10 — Frontend MVP *(done)*
+
+`apps/frontend/` — a **Next.js 15 / React 19 / Tailwind** operator dashboard.
+Read-mostly, over the **existing** internal APIs — **no backend code changed**.
+
+- **Views** — a dashboard (incident counts + live detector stats), a filterable
+  incident list, incident detail (evidence, lifecycle history, cross-service
+  **related incidents**, acknowledge/resolve), the **RCA report** (with a "start
+  investigation" action), and a Models page (live provenance + inference stats).
+- **Human remediation-approval flow** — lists an incident's remediations; for
+  `PENDING_APPROVAL`, an approval form (approver identity + role + reason) wired
+  to the real `POST /remediations/{id}/approve|reject`; for `APPROVED`, an
+  Execute control with a dry-run toggle.
+- **No `/api/v1` gateway, no CORS** — the four content services have neither,
+  so `next.config.mjs` **server-side rewrites** proxy them under one
+  same-origin `/api/*` prefix instead of adding CORS middleware anywhere.
+- **Types mirror the backend exactly** (`app/lib/types.ts`) — incident severity,
+  the RCA report shape, the 9-value investigation status, the 13-value
+  remediation status — no invented fields.
+
+**Phase 10.1 (hardening, done)** — a JWT login gate: `apps/api` gained
+`/api/v1/auth/{login,me,register}` (`pyjwt`, PBKDF2-HMAC hashing, an in-memory
+demo user store — `admin`/`admin123`, `approver`/`approver123`,
+`viewer`/`viewer123`, roles `viewer < approver < admin`), and the dashboard
+gained a login page + `AuthGuard` that blocks every route until the token
+validates. Approve/reject/execute and acknowledge/resolve render only for
+`approver`+. **Scope note:** this protects `apps/api`'s new routes and the
+dashboard UI only — the incident/RCA/remediation/detector services still don't
+check the token, unchanged from Phase 10 (ADR-003: they're internal by
+design); a direct API call still bypasses the login exactly as it could
+before. A `frontend` job was also added to CI (lint/typecheck/build), and the
+dashboard/incident-detail/remediation panel now auto-refresh (10s/15s/15s,
+toggleable) instead of requiring a manual refresh.
+
+Verified: `npm run build` / `next lint` / `tsc --noEmit` all clean; the built app
+was run against a live `incident-correlator` **and** a live `apps/api`, and the
+`/api/incident/*` and `/api/auth/login` + `/api/auth/me` proxies returned real
+data end to end (a real JWT round-tripped through the login flow). 16 new
+backend tests (`tests/test_auth.py`). The Python suite, Ruff, and mypy pass.
+Full integration: `frontend` + `api` compose services, `make
+frontend-{install,dev,build,lint}`. Details:
+[docs/architecture/phase-10.md](docs/architecture/phase-10.md) ·
+[docs/phase10-summary.md](docs/phase10-summary.md) ·
+[apps/frontend/README.md](apps/frontend/README.md).
+
 **Not implemented** (later phases): the full observability stack — Loki (logs) /
 Tempo (traces) / an OTel collector / cross-service instrumentation beyond the
 anomaly-detector; Kubernetes, AWS, Terraform,
-hardened CI/CD (Phase 9); real-infrastructure remediation executors and
+hardened CI/CD (Phase 11); real-infrastructure remediation executors and
 autonomous remediation (out of scope by design —
 [ADR-003](docs/decisions/adr-003-human-in-the-loop-remediation.md));
 autonomous / scheduled retraining (Phase 6 is CLI-driven by design);
-authentication (the approver identity model is a demo, not auth);
+authentication on the incident / RCA / remediation / detector services
+themselves (a deliberate scope boundary — see Phase 10.1's scope note above);
 incident merging and topology **discovery** (Phase 8 links are advisory, over a
 hand-declared graph).

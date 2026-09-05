@@ -359,7 +359,97 @@ directional (acyclic), deduped, race-safe linking; same-service Phase 3
 correlation and every existing test unchanged; Ruff + format + mypy green;
 no fabricated metrics.
 
-## Phase 9 — Orchestration, cloud, IaC, hardened CI/CD — planned
+## Phase 9 — AI Root Cause Agent — done (2026-09-04)
+
+The RCA agent was built in the implementation as **Phase 4**; Phase 9 is the
+blueprint's number for the same work and the formal close-out (docs +
+verification). `services/rca-agent` turns each Phase 3/8 incident into an
+**evidence-backed, explainable root-cause analysis** performed by a controlled
+LangGraph investigation agent: a closed registry of **read-only** evidence tools
+(ADR-020), a fixed `initialize → plan → collect → analyze → verify → synthesize →
+validate` graph (ADR-021), a mock/live LLM boundary (`RCA_MODE=mock` deterministic
+by default; `live` = Anthropic behind the same `LlmClient` protocol, ADR-022),
+prompt-injection defense + resource budgets, and an Investigation HTTP API
+(`incident.opened` Kafka consumer + `POST /investigations` +
+`GET /investigations/{id}` + `GET /incidents/{id}/investigation`, ADR-023). **The
+LLM proposes; deterministic code decides** — it never controls the tool
+allow-list, arguments, limits, evidence ids, state, persistence, or remediation.
+The remediation output is a *recommendation* that always requires human approval
+(Phase 5 owns execution). Details:
+[../architecture/phase-9.md](../architecture/phase-9.md) ·
+[../architecture/phase-4.md](../architecture/phase-4.md) ·
+[../phase9-summary.md](../phase9-summary.md); `make phase9-verify`.
+
+**Exit criteria (met):** the LangGraph engine, the closed read-only tool
+registry, structured `RCAReport` validation, the mock/live LLM boundary, and the
+Investigation API are implemented and tested (`tests/rca_agent/`, 228 tests);
+`scripts/rca_scenario.py` (mock, in-process) and `scripts/rca_e2e_scenario.py`
+(full chain: `incident.opened` → idempotent consumer → RCA → API) both run
+clean; `scripts/phase9_verify.py` (`make phase9-verify`) drives both and reports
+real numbers; the full suite still passes; Ruff + format + mypy green; no new
+features, no fabricated metrics.
+
+## Phase 10 — Frontend MVP — done (2026-09-04)
+
+`apps/frontend/` — a **Next.js 15 / React 19 / Tailwind** operator dashboard over
+the existing internal APIs. **No backend changes.** Pages: a dashboard (incident
+counts + live detector stats), an incident list with `service` / `status` /
+`severity` filters, an incident detail (evidence, lifecycle history,
+cross-service related incidents, acknowledge / resolve), the **RCA report** from
+the rca-agent (`/incidents/{id}/investigation`, with a "Start investigation"
+action), the **human remediation-approval flow** (list remediations for the
+incident; approve / reject with an explicit approver identity + role + reason;
+`APPROVED` → execute with a dry-run toggle; policy / approval / execution /
+verification detail), and a Models page (live provenance + inference stats from
+the anomaly-detector `/model-info` + `/ready/stats`).
+
+**No auth** — the SentinelOps services are internal and unauthenticated by
+design (ADR-003 note); approve / reject / execute pass an actor in the body. The
+four services (`:8002` incident, `:8003` detector, `:8004` rca, `:8005`
+remediation) have no CORS and no `/api/v1` gateway, so `next.config.mjs` rewrites
+**proxy them server-side** under one same-origin `/api/*` prefix — no
+cross-origin request, no backend change. Full integration: a `frontend`
+docker-compose service (`:3100`), `make frontend-{install,dev,build,lint}`,
+`.gitignore` + ruff/mypy excludes. Details:
+[../architecture/phase-10.md](../architecture/phase-10.md) ·
+[../phase10-summary.md](../phase10-summary.md) ·
+[../../apps/frontend/README.md](../../apps/frontend/README.md).
+
+**Exit criteria (met):** `apps/frontend/` builds (`next build`) and passes
+`next lint` + `tsc --noEmit`; every view reads a real API response shape (types
+mirror the backend Pydantic models — no fabricated fields); the approval flow
+calls the real remediation endpoints; no backend API changed and the full Python
+suite + Ruff + mypy still pass; the toolchain (compose service, Makefile,
+ignores) is wired.
+
+### Phase 10.1 — Auth, RBAC, CI & auto-refresh (hardening) — done (2026-09-04)
+
+A hardening pass over the Phase 10 MVP, **not a renumbering**. `apps/api` (the
+platform API skeleton) gains JWT auth — `/api/v1/auth/{login,me,register}`
+(`sentinelops_api/auth.py` + `routes/auth.py`; PyJWT, PBKDF2-HMAC password
+hashing, an in-memory demo user store: `admin`/`admin123`, `approver`/
+`approver123`, `viewer`/`viewer123`, role hierarchy `viewer < approver <
+admin`) — and the dashboard gains a login page + `AuthGuard` that blocks every
+route until the token validates against `/auth/me`. Approve/reject/execute and
+acknowledge/resolve render only for `approver`+; `Nav.tsx` shows the signed-in
+user + role + sign-out. **Scope boundary, stated explicitly:** the incident /
+RCA / remediation / detector services still don't check the token — only
+`apps/api`'s new routes and the dashboard UI are protected, unchanged from
+Phase 10's internal-service design (ADR-003). A `frontend` job was added to
+`.github/workflows/ci.yml` (`npm ci` → lint → typecheck → build), and the
+dashboard / incident-detail / remediation panel now auto-refresh (10 s / 15 s /
+15 s, toggleable) instead of requiring a manual refresh. Details:
+[../architecture/phase-10.md §9](../architecture/phase-10.md).
+
+**Exit criteria (met):** JWT login issues/validates real tokens (verified over
+HTTP, not just unit tests); RBAC hierarchy enforced both server-side
+(`/register` returns 403 for viewer/approver, 201 for admin) and in the
+dashboard UI; 16 new tests (`tests/test_auth.py`) pass; the frontend CI job
+lints/typechecks/builds; auto-refresh intervals clean up on unmount; the full
+Python suite + Ruff + mypy still pass; no change to the incident/RCA/
+remediation/detector services.
+
+## Phase 11 — Orchestration, cloud, IaC, hardened CI/CD — planned
 
 Kubernetes manifests/Helm; AWS as target cloud; Terraform modules; CI/CD
 extended to build, scan, publish, and deploy.
