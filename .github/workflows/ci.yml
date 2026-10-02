@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # Ephemeral CI-only key; production deployments must provide their own.
+  JWT_SECRET_KEY: ci-only-jwt-secret-change-me-32-bytes
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -33,6 +37,8 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+      - name: Frontend unit tests
+        run: npm test -- --runInBand
 
   quality:
     runs-on: ubuntu-latest

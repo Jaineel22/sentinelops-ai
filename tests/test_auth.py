@@ -86,10 +86,10 @@ def test_me_rejects_token_for_a_role_that_no_longer_matches(client: TestClient) 
     """A token minted for a role the user no longer has (e.g. demoted) is
     rejected rather than trusted — decode_access_token checks the live store."""
     from sentinelops_api.auth import Role, create_access_token
-    from sentinelops_api.config import AuthSettings
+    from sentinelops_api.config import get_settings
 
     token = create_access_token(
-        subject="viewer", role=Role.ADMIN, settings=AuthSettings()
+        subject="viewer", role=Role.ADMIN, settings=get_settings().auth
     ).access_token
     resp = client.get("/api/v1/auth/me", headers=_auth_header(token))
     assert resp.status_code == 401
@@ -97,10 +97,13 @@ def test_me_rejects_token_for_a_role_that_no_longer_matches(client: TestClient) 
 
 def test_expired_token_is_rejected(client: TestClient) -> None:
     from sentinelops_api.auth import Role, create_access_token
-    from sentinelops_api.config import AuthSettings
+    from sentinelops_api.config import get_settings
 
     token = create_access_token(
-        subject="viewer", role=Role.VIEWER, settings=AuthSettings(), expires_minutes=-1
+        subject="viewer",
+        role=Role.VIEWER,
+        settings=get_settings().auth,
+        expires_minutes=-1,
     ).access_token
     resp = client.get("/api/v1/auth/me", headers=_auth_header(token))
     assert resp.status_code == 401

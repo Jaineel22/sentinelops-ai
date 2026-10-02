@@ -35,6 +35,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """
 
     settings = settings or get_settings()
+    if not settings.auth.secret_key.get_secret_value().strip():
+        raise RuntimeError("JWT_SECRET_KEY must be set to a non-empty secret before startup")
 
     app = FastAPI(
         title="SentinelOps AI API",

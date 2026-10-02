@@ -7,8 +7,8 @@ cross-service correlation → RCA → human-approved remediation) but left it
 headless. Phase 10 adds **`apps/frontend/`** — a small **Next.js 15 / React 19 /
 Tailwind** operator dashboard that renders the existing internal APIs and drives
 the writes an operator already has: acknowledge / resolve an incident, start an
-investigation, and **approve / reject / execute a remediation**. There are **no
-backend changes and no new Python** — the TypeScript types mirror the backend
+investigation, and **approve / reject / execute a remediation**. The TypeScript
+types mirror the backend
 Pydantic models field-for-field, and the four services (incident-correlator
 `:8002`, anomaly-detector `:8003`, rca-agent `:8004`, remediation-controller
 `:8005`), which have no CORS and no `/api/v1` gateway, are reached through
@@ -16,8 +16,8 @@ Pydantic models field-for-field, and the four services (incident-correlator
 The approval flow records an explicit `approver_identity` + `approver_role` +
 `reason` and posts them to the existing endpoint. A follow-up hardening pass
 (**Phase 10.1**, below) added a real JWT login + RBAC gate to the dashboard
-itself; the four backend services above are still internal and unauthenticated
-by design (ADR-003 note) — unchanged.
+itself; Phase 10.2 extends the same bearer token validation to all four backend
+services and keeps only health/metrics public.
 
 ## Phase 10.1 — Auth, RBAC, CI & auto-refresh (hardening)
 
@@ -29,10 +29,8 @@ by design (ADR-003 note) — unchanged.
   `app/components/AuthGuard.tsx` (blocks every route until a token validates
   against `/auth/me`). Approve/reject/execute and acknowledge/resolve render
   only for `hasRole("approver")`; `Nav.tsx` shows the signed-in user + role.
-- **Honest scope**: the incident/RCA/remediation/detector services still don't
-  check the token — only `apps/api`'s new routes and the dashboard UI are
-  protected. A direct `curl` to `remediation-controller` bypasses the login
-  exactly as it could in Phase 10. See
+- **Phase 10.2 scope**: the incident/RCA/remediation/detector services validate
+  the forwarded token; direct unauthenticated calls fail closed. See
   [phase-10.md §9.1](architecture/phase-10.md) for the full boundary statement.
 - **CI** — a new `frontend` job in `.github/workflows/ci.yml`
   (`npm ci` → lint → typecheck → build), independent of the Python jobs.
@@ -117,15 +115,13 @@ mypy excludes; a `frontend` job in `.github/workflows/ci.yml` (Phase 10.1).
 
 ## Known limitations
 
-- **The backend services (incident/RCA/remediation/detector) remain
-  unauthenticated** — only `apps/api`'s new routes and the dashboard UI are
-  protected (Phase 10.1 §9.1). A direct API caller bypasses the login exactly
-  as before.
+- **The backend services (incident/RCA/remediation/detector) validate the
+  shared bearer token**; direct unauthenticated API calls fail closed.
 - **Demo-grade credentials** — 3 hardcoded users, in-memory (resets on
-  restart), a default JWT secret meant for local dev only.
+  restart). A deployment must provide its own `JWT_SECRET_KEY`.
 - **No MLflow / drift in the UI**; **remediations aren't proposed from the UI**
   (the controller creates them from an RCA recommendation).
-- **No frontend unit tests**; port is `3100` (Grafana owns `3000`).
+- **Port is `3100`** (Grafana owns `3000`).
 
 ## Commands
 
@@ -143,3 +139,17 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
 
 Full write-up: [architecture/phase-10.md](architecture/phase-10.md) ·
 [apps/frontend/README.md](../apps/frontend/README.md).
+
+## Phase 10.2 — Security hardening and frontend tests
+
+Phase 10.2 adds shared JWT validation to the incident-correlator, RCA agent,
+remediation-controller, and anomaly-detector. Protected endpoints fail closed
+with `401` for missing/invalid/expired tokens and `403` for insufficient roles.
+Remediation approval records the authenticated JWT subject and role rather than
+client-supplied identity fields. `JWT_SECRET_KEY` is now required and Compose
+fails fast when it is absent.
+
+The frontend attaches the bearer token to data-plane calls and adds Jest +
+Testing Library coverage for auth, route guarding, remediation RBAC, and
+incident RBAC. The live Anthropic walkthrough is in `docs/demo.md` and uses
+`scripts/live_rca_demo.sh`; mock RCA remains the default.

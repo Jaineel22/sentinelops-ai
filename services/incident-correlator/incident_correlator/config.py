@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from incident_correlator import SERVICE_NAME
@@ -26,6 +26,13 @@ class AppSettings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
+
+
+class AuthSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    secret_key: SecretStr = Field(validation_alias="JWT_SECRET_KEY")
+    algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
 
 
 class KafkaSettings(BaseSettings):
@@ -71,6 +78,7 @@ class Settings(BaseSettings):
     correlation: CorrelationConfig = Field(default_factory=CorrelationConfig)
     severity: SeverityConfig = Field(default_factory=SeverityConfig)
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
+    auth: AuthSettings = Field(default_factory=lambda: AuthSettings())  # type: ignore[call-arg]
 
 
 @lru_cache

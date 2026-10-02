@@ -30,6 +30,7 @@ from incident_correlator.db import Database, SqlIncidentRepository
 from incident_correlator.metrics import get_metrics
 from incident_correlator.processor import AnomalyProcessor
 from incident_correlator.repository import IncidentRepository
+from sentinelops_common.auth import AuthConfig, init_auth
 from sentinelops_common.kafka import KafkaJsonProducer, ensure_topics
 from sentinelops_common.obs import configure_observability, shutdown_observability
 
@@ -121,6 +122,9 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.settings = settings
+    app.state.auth_config = init_auth(
+        AuthConfig(secret_key=settings.auth.secret_key, algorithm=settings.auth.algorithm)
+    )
     app.state.repository = repository
     app.state.consumer = consumer
     app.state.metrics = metrics

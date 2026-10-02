@@ -1,6 +1,7 @@
 # Phase 10 — Frontend MVP (operator dashboard)
 
-> Status: **complete**, including the **Phase 10.1 hardening pass** (§9): JWT
+> Status: **complete**, including the **Phase 10.1 and 10.2 hardening passes**:
+> JWT
 > login + RBAC, a frontend CI job, and dashboard auto-refresh. `apps/frontend/`
 > is a Next.js 15 / React 19 / Tailwind dashboard over the existing internal
 > APIs plus one small, additive backend change (`apps/api`'s new auth routes —
@@ -100,16 +101,14 @@ them **server-side** under one same-origin prefix:
 
 The browser only ever calls `http://localhost:3100/api/*` (same origin). In
 `docker compose` the `frontend` service sets those env vars to the internal
-service names. **No backend code changed.**
+service names. Backend services validate the forwarded bearer token.
 
-## 5. Authentication — JWT login gates the dashboard UI (Phase 10.1, §9)
+## 5. Authentication — JWT login and service enforcement (Phases 10.1–10.2)
 
-The four backend services (incident/RCA/remediation/detector) are still
-internal and unauthenticated by design (ADR-003 note) — **unchanged**.
-Phase 10.1 adds a real JWT login screen backed by `apps/api`, so the dashboard
-itself now requires sign-in and gates write actions by role. See §9 for the
-full design and its honest scope limits (the four backend services still don't
-check the token — see §9.1).
+Phase 10.1 adds a real JWT login screen backed by `apps/api`, and Phase 10.2
+extends the same signed token to every data-plane service. The dashboard and
+the backend now enforce the same role boundary; health and metrics remain
+public for orchestration.
 
 ## 6. Toolchain integration
 
@@ -145,35 +144,32 @@ check the token — see §9.1).
   links out.
 - **Remediations are not proposed from the UI** — the dashboard only acts on
   remediations the controller already created from an RCA recommendation.
-- **No frontend unit tests** — `next build` + `next lint` + `tsc` (now in CI,
-  §6/§9) are the gate; no component/integration test suite.
+- Frontend unit tests use Jest + Testing Library and run in CI (§10).
 - Next dev/prod port is **3100** (Grafana already owns `3000`).
-- See §9.6 for the auth-specific limitations (demo credential store, no
-  refresh tokens, the backend services still don't check the token, etc.).
+- See §9.6 for the auth-specific limitations (demo credential store and no
+  refresh tokens).
 
 ## 9. Phase 10.1 — Auth, RBAC, CI & auto-refresh (hardening)
 
 A follow-up hardening pass over the Phase 10 MVP. **No new features beyond
-what's listed here** — the views, proxy wiring, and RBAC-free backend design
-from §1–§8 are otherwise unchanged.
+what's listed here** — the views, proxy wiring, and data model are otherwise
+unchanged.
 
 ### 9.1 Scope — what actually got protected
 
 `apps/api` (the platform API skeleton, previously just `/health` + `/`) gained
 JWT auth (`sentinelops_api.auth` + `sentinelops_api.routes.auth`, mounted at
-`/api/v1/auth/*`) **and nothing else changed on the backend** — the incident /
-RCA / remediation / detector services are still unauthenticated internal
-services (unchanged from §5's original Phase 10 note). So concretely:
+`/api/v1/auth/*`). Phase 10.2 then wires the same verifier into the four
+data-plane services. So concretely:
 
 - The dashboard **requires sign-in** to view any page (`AuthGuard`).
 - Write actions the UI exposes (acknowledge/resolve, approve/reject/execute)
   are **gated in the UI** by the signed-in user's role.
-- The **underlying write endpoints on remediation-controller /
-  incident-correlator still accept any caller** — exactly as in Phase 10. A
-  `curl` caller who never goes through the dashboard can still call
-  `POST /remediations/{id}/approve` directly. Protecting those endpoints would
-  mean adding auth to services deliberately kept internal-only by design; that
-  was explicitly out of scope for this pass and would need its own ADR.
+- The underlying data-plane routes reject missing, invalid, or expired bearer
+  tokens with `401`; insufficient roles receive `403`.
+- Remediation approval/rejection uses the signed JWT subject and role. The
+  identity and role fields in the legacy request body are not authorization
+  inputs.
 
 This is an honest, deliberate boundary, not an oversight — stated so nobody
 mistakes the dashboard's login screen for the whole platform being secured.
@@ -270,11 +266,9 @@ fail closed, not just "trust the JWT claims forever."
 
 ### 9.6 Known limitations (Phase 10.1-specific)
 
-- **The four backend services remain unauthenticated** — see §9.1. This is the
-  single most important scope note for anyone reading this doc.
-- **Demo-grade credentials**: three hardcoded users, an in-memory registry that
-  resets on restart, a default JWT secret meant only for local dev
-  (`JWT_SECRET_KEY` overrides it).
+- **Demo-grade credentials**: three hardcoded users and an in-memory registry
+  that resets on restart. Replace this store with the production identity
+  provider before deployment.
 - **No refresh tokens / no logout-everywhere** — a token is valid for its full
   `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` (30 min default) regardless of client-side
   "sign out," which only deletes the local copy.
@@ -282,3 +276,27 @@ fail closed, not just "trust the JWT claims forever."
   gating — every actual write still requires the token to pass `/api/auth/me`-
   equivalent server-side validation on `apps/api`; the RBAC gate on the
   dashboard buttons is a UX affordance, not the enforcement boundary (see 9.1).
+
+## 10. Phase 10.2 — Security hardening and frontend tests
+
+Phase 10.2 closes the Phase 10.1 security boundary. The reusable
+`libs/sentinelops_common/auth.py` module validates signature, expiry, subject,
+and role from the bearer token. Incident reads require an authenticated user;
+incident lifecycle writes, RCA investigation creation, and remediation
+approval/rejection require the approver role. RCA reads and detector model
+endpoints require authentication. Remediation decisions use the signed
+username and map its signed platform role to the controller's closed
+`ApproverRole`; request-body identity and role fields are retained only for
+backward-compatible validation and are never trusted.
+
+`JWT_SECRET_KEY` is required by `apps/api` and every protected service. Compose
+uses `${JWT_SECRET_KEY?error:JWT_SECRET_KEY_not_set}` so a missing secret fails
+before containers start. `/health` and `/metrics` remain public for probes.
+
+The frontend now attaches the bearer token to every proxied data-plane request.
+Jest + Testing Library cover auth helpers, `AuthGuard`, remediation RBAC and
+incident lifecycle RBAC; these tests run in the frontend CI job.
+
+The live RCA walkthrough is documented in [../demo.md](../demo.md) and
+implemented by `scripts/live_rca_demo.sh`; `RCA_MODE=mock` remains the
+deterministic, keyless default.

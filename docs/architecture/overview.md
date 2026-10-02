@@ -59,7 +59,8 @@ tracks what is actually built. It is updated at the end of every phase.
   **Phase 10.1** adds a JWT login gate (`apps/api` gains
   `/api/v1/auth/*`) + RBAC in the dashboard UI, a frontend CI job, and
   auto-refresh — the incident/RCA/remediation/detector services underneath
-  remain unauthenticated by design (section 12).
+  validate the shared JWT on protected routes; health and metrics remain public
+  for orchestration (Phase 10.2).
 
 See the per-phase docs. Sections 5, 8, 9, 11 and 12 are implemented; section 10
 (packaging / orchestration) and the deferred parts of 9 (Loki, Tempo,

@@ -24,7 +24,7 @@ import json
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from remediation_controller.api.schemas import (
@@ -41,6 +41,7 @@ from remediation_controller.api.schemas import (
 )
 from remediation_controller.domain.enums import (
     ApprovalDecision,
+    ApproverRole,
     RemediationActionType,
     RemediationStatus,
 )
@@ -64,6 +65,7 @@ from remediation_controller.repository import (
     UnauthorizedApproverError,
 )
 from remediation_controller.service import RemediationService
+from sentinelops_common.auth import AuthenticatedUser, require_role
 
 logger = logging.getLogger("remediation_controller.api")
 
@@ -211,14 +213,21 @@ async def get_remediation_audit(
 
 
 async def _decide(
-    request: Request, remediation_id: str, body: ApprovalRequest, decision: ApprovalDecision
+    request: Request,
+    remediation_id: str,
+    body: ApprovalRequest,
+    decision: ApprovalDecision,
+    user: AuthenticatedUser,
 ) -> RemediationView:
+    approver_role = (
+        ApproverRole.ADMINISTRATOR if user.role == "admin" else ApproverRole.INCIDENT_RESPONDER
+    )
     try:
         record = await _service(request).decide(
             remediation_id,
             decision=decision,
-            approver_identity=body.approver_identity,
-            approver_role=body.approver_role,
+            approver_identity=user.username,
+            approver_role=approver_role,
             reason=body.reason,
             correlation_id=_correlation_id(request),
         )
@@ -247,16 +256,22 @@ async def _decide(
 
 @remediations_router.post("/{remediation_id}/approve", response_model=RemediationView)
 async def approve_remediation(
-    remediation_id: str, body: ApprovalRequest, request: Request
+    remediation_id: str,
+    body: ApprovalRequest,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_role("approver"))],
 ) -> RemediationView:
-    return await _decide(request, remediation_id, body, ApprovalDecision.APPROVE)
+    return await _decide(request, remediation_id, body, ApprovalDecision.APPROVE, user)
 
 
 @remediations_router.post("/{remediation_id}/reject", response_model=RemediationView)
 async def reject_remediation(
-    remediation_id: str, body: ApprovalRequest, request: Request
+    remediation_id: str,
+    body: ApprovalRequest,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_role("approver"))],
 ) -> RemediationView:
-    return await _decide(request, remediation_id, body, ApprovalDecision.REJECT)
+    return await _decide(request, remediation_id, body, ApprovalDecision.REJECT, user)
 
 
 @remediations_router.post("/{remediation_id}/execute", response_model=RemediationView)

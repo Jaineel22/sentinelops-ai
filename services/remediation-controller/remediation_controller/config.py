@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from remediation_controller import SERVICE_NAME
@@ -33,6 +33,13 @@ class AppSettings(BaseSettings):
     # ``remediation_controller.recovery.config``, ADR-025 discipline).
     verification_timeout_seconds: int = 30
     verification_poll_interval_seconds: float = 3.0
+
+
+class AuthSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    secret_key: SecretStr = Field(validation_alias="JWT_SECRET_KEY")
+    algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
 
 
 class KafkaSettings(BaseSettings):
@@ -79,6 +86,7 @@ class Settings(BaseSettings):
     db: DbSettings = Field(default_factory=DbSettings)
     kafka: KafkaSettings = Field(default_factory=KafkaSettings)
     otel: OTelSettings = Field(default_factory=OTelSettings)
+    auth: AuthSettings = Field(default_factory=lambda: AuthSettings())  # type: ignore[call-arg]
 
 
 @lru_cache

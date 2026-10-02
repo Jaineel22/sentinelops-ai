@@ -6,6 +6,23 @@
 > (orchestration / cloud / IaC) under [Planned architecture](#planned-architecture)
 > and [Technology roadmap](#technology-roadmap) are future work and labelled as such.
 
+## Live LLM Demo
+
+The default RCA path is deterministic mock mode, so local development and CI
+never require a provider credential. To see the evidence-grounded RCA agent
+using Anthropic:
+
+```bash
+export ANTHROPIC_API_KEY=your-key
+export JWT_SECRET_KEY="$(openssl rand -hex 32)"
+bash scripts/live_rca_demo.sh
+```
+
+The script starts the Compose stack, generates the controlled `latency`
+scenario, authenticates as the demo operator, triggers an investigation, and
+prints the resulting report. See [docs/demo.md](docs/demo.md) for setup,
+sample output, and the mock/live boundary. Never commit either secret.
+
 ## What it is
 
 SentinelOps AI is an ML-powered, cloud-native **incident intelligence platform**.

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from rca_agent.api.runner import BackgroundInvestigationRunner
@@ -13,6 +14,7 @@ from rca_agent.api.schemas import CreateInvestigationRequest, InvestigationDetai
 from rca_agent.domain import InvestigationTrigger
 from rca_agent.repository import InvestigationRepository
 from rca_agent.schemas import Investigation, InvestigationStep
+from sentinelops_common.auth import AuthenticatedUser, get_current_user, require_role
 
 logger = logging.getLogger("rca_agent.api")
 
@@ -70,7 +72,10 @@ def metrics() -> Response:
     "/investigations", response_model=InvestigationDetail, status_code=status.HTTP_202_ACCEPTED
 )
 async def create_investigation(
-    body: CreateInvestigationRequest, request: Request, response: Response
+    body: CreateInvestigationRequest,
+    request: Request,
+    response: Response,
+    _user: Annotated[AuthenticatedUser, Depends(require_role("approver"))],
 ) -> InvestigationDetail:
     """Trigger a manual investigation. ``202`` with the new (PENDING)
     investigation; ``200`` with the existing one if this incident has already
@@ -94,7 +99,11 @@ async def create_investigation(
 
 
 @investigations_router.get("/investigations/{investigation_id}", response_model=InvestigationDetail)
-async def get_investigation(investigation_id: str, request: Request) -> InvestigationDetail:
+async def get_investigation(
+    investigation_id: str,
+    request: Request,
+    _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> InvestigationDetail:
     investigation = await _repo(request).get_investigation(investigation_id)
     if investigation is None:
         raise HTTPException(
@@ -107,7 +116,9 @@ async def get_investigation(investigation_id: str, request: Request) -> Investig
     "/investigations/{investigation_id}/steps", response_model=list[InvestigationStep]
 )
 async def get_investigation_steps(
-    investigation_id: str, request: Request
+    investigation_id: str,
+    request: Request,
+    _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
 ) -> list[InvestigationStep]:
     """Just the operational trace — cheap to poll while an investigation runs.
     Concise action/result entries only, never private model reasoning. ``404``
@@ -124,7 +135,11 @@ async def get_investigation_steps(
 @investigations_router.get(
     "/incidents/{incident_id}/investigation", response_model=InvestigationDetail
 )
-async def get_incident_investigation(incident_id: str, request: Request) -> InvestigationDetail:
+async def get_incident_investigation(
+    incident_id: str,
+    request: Request,
+    _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> InvestigationDetail:
     investigation = await _repo(request).get_latest_investigation(incident_id)
     if investigation is None:
         raise HTTPException(

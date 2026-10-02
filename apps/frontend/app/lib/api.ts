@@ -1,14 +1,9 @@
 // Thin fetch wrappers over the same-origin `/api/*` proxy (see next.config.mjs).
 //
-// The incident / RCA / remediation / detector services below remain internal
-// and unauthenticated by design (ADR-003 note) — unchanged from Phase 10;
-// approve/reject/execute pass an explicit actor in the body, not a token.
-// Phase 10.1 adds a real JWT login (see ./auth.ts) that gates the *dashboard
-// UI* — the AuthGuard component blocks unauthenticated access to these pages,
-// and role checks (hasRole) gate the write actions in the UI. The token is
-// never attached to these particular requests because these services don't
-// check it; see docs/architecture/phase-10.md §5 for the full scope note.
+// All data-plane services validate the same JWT issued by apps/api. The
+// browser remains same-origin; Next.js forwards this header through its proxy.
 
+import { getToken } from "./auth";
 import type {
   IncidentDetail,
   IncidentSummary,
@@ -31,9 +26,14 @@ export class ApiError extends Error {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
   const res = await fetch(path, {
     ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
     cache: "no-store",
   });
   const text = await res.text();

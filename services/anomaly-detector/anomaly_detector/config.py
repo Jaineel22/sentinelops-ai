@@ -6,7 +6,7 @@ import os
 from functools import lru_cache
 
 from ml.mlops.config import MLflowSettings
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from anomaly_detector import SERVICE_NAME
@@ -19,6 +19,13 @@ class AppSettings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
+
+
+class AuthSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    secret_key: SecretStr = Field(validation_alias="JWT_SECRET_KEY")
+    algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
 
 
 class KafkaSettings(BaseSettings):
@@ -98,6 +105,7 @@ class Settings(BaseSettings):
     detector: DetectorSettings = Field(default_factory=DetectorSettings.from_env)
     health: HealthSettings = Field(default_factory=HealthSettings)
     otel: OTelSettings = Field(default_factory=OTelSettings)
+    auth: AuthSettings = Field(default_factory=lambda: AuthSettings())  # type: ignore[call-arg]
 
 
 @lru_cache

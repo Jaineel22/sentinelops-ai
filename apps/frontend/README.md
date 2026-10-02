@@ -1,4 +1,4 @@
-# SentinelOps frontend (Phase 10 / 10.1)
+# SentinelOps frontend (Phase 10 / 10.1 / 10.2)
 
 A small **Next.js 15 / React 19 / Tailwind** operator dashboard over the existing
 SentinelOps APIs. Read-mostly: incident triage, the RCA report, and the **human
@@ -7,10 +7,10 @@ remediation-approval flow**, with auto-refresh and a JWT login gate.
 **Sign in required** — `apps/api` issues the token (`/api/v1/auth/login`); demo
 accounts: `admin`/`admin123`, `approver`/`approver123`, `viewer`/`viewer123`
 (`viewer < approver < admin`). Approve/reject/execute and acknowledge/resolve
-require `approver` or `admin`. Scope note: this login gates **the dashboard
-UI** — the incident/RCA/remediation/detector services it reads from are still
-internal and unauthenticated by design (ADR-003 note); approve/reject/execute
-still send an explicit actor in the request body, exactly as `curl` would.
+require `approver` or `admin`. The frontend attaches the bearer token to every
+data-plane request; those services independently validate it. Remediation
+approval derives identity and role from signed claims, not the legacy request
+body fields.
 
 ## What it shows
 

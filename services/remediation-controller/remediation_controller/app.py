@@ -41,6 +41,7 @@ from remediation_controller.policy import PolicyEngine
 from remediation_controller.recovery import RecoveryVerificationConfig
 from remediation_controller.repository import RemediationRepository
 from remediation_controller.service import RemediationService
+from sentinelops_common.auth import AuthConfig, init_auth
 from sentinelops_common.kafka import KafkaJsonProducer, ensure_topics
 from sentinelops_common.obs import configure_observability, shutdown_observability
 
@@ -150,6 +151,9 @@ def create_app(
         version=__version__,
         summary="Remediation proposals, human approval, and allow-listed simulated execution.",
         lifespan=lifespan,
+    )
+    app.state.auth_config = init_auth(
+        AuthConfig(secret_key=settings.auth.secret_key, algorithm=settings.auth.algorithm)
     )
 
     @app.middleware("http")

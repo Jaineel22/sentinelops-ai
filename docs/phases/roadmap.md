@@ -403,9 +403,7 @@ incident; approve / reject with an explicit approver identity + role + reason;
 verification detail), and a Models page (live provenance + inference stats from
 the anomaly-detector `/model-info` + `/ready/stats`).
 
-**No auth** — the SentinelOps services are internal and unauthenticated by
-design (ADR-003 note); approve / reject / execute pass an actor in the body. The
-four services (`:8002` incident, `:8003` detector, `:8004` rca, `:8005`
+The four services (`:8002` incident, `:8003` detector, `:8004` rca, `:8005`
 remediation) have no CORS and no `/api/v1` gateway, so `next.config.mjs` rewrites
 **proxy them server-side** under one same-origin `/api/*` prefix — no
 cross-origin request, no backend change. Full integration: a `frontend`
@@ -432,10 +430,9 @@ hashing, an in-memory demo user store: `admin`/`admin123`, `approver`/
 admin`) — and the dashboard gains a login page + `AuthGuard` that blocks every
 route until the token validates against `/auth/me`. Approve/reject/execute and
 acknowledge/resolve render only for `approver`+; `Nav.tsx` shows the signed-in
-user + role + sign-out. **Scope boundary, stated explicitly:** the incident /
-RCA / remediation / detector services still don't check the token — only
-`apps/api`'s new routes and the dashboard UI are protected, unchanged from
-Phase 10's internal-service design (ADR-003). A `frontend` job was added to
+user + role + sign-out. Phase 10.2 extends the same signed token to the
+incident / RCA / remediation / detector services, with health and metrics
+remaining public for probes. A `frontend` job was added to
 `.github/workflows/ci.yml` (`npm ci` → lint → typecheck → build), and the
 dashboard / incident-detail / remediation panel now auto-refresh (10 s / 15 s /
 15 s, toggleable) instead of requiring a manual refresh. Details:
@@ -448,6 +445,21 @@ dashboard UI; 16 new tests (`tests/test_auth.py`) pass; the frontend CI job
 lints/typechecks/builds; auto-refresh intervals clean up on unmount; the full
 Python suite + Ruff + mypy still pass; no change to the incident/RCA/
 remediation/detector services.
+
+### Phase 10.2 — Security hardening & frontend tests — done (2026-10-02)
+
+`libs/sentinelops_common/auth.py` is now the shared JWT verifier for every
+data-plane service. Incident reads, RCA investigation endpoints, detector
+model/readiness data, and remediation APIs require a bearer token; lifecycle
+writes and remediation approval require the approver role. Remediation audit
+records derive identity and role from signed claims, closing the
+client-supplied approver gap. `JWT_SECRET_KEY` is required by the platform API
+and Compose services, with fail-fast interpolation and startup validation.
+
+Jest + Testing Library cover auth helpers, `AuthGuard`, remediation RBAC and
+incident RBAC and run in CI. The live RCA walkthrough is available through
+`scripts/live_rca_demo.sh`, with setup and honest mock/live behavior documented
+in `docs/demo.md`.
 
 ## Phase 11 — Orchestration, cloud, IaC, hardened CI/CD — planned
 

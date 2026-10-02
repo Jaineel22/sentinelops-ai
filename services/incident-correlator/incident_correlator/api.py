@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,7 @@ from incident_correlator.domain import (
 )
 from incident_correlator.repository import IncidentFilter, IncidentRepository
 from incident_correlator.state_machine import InvalidTransitionError, validate_transition
+from sentinelops_common.auth import AuthenticatedUser, get_current_user, require_role
 
 logger = logging.getLogger("incident_correlator.api")
 
@@ -252,6 +253,7 @@ def metrics() -> Response:
 @incidents_router.get("", response_model=list[IncidentSummary])
 async def list_incidents(
     request: Request,
+    _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     status_: Annotated[IncidentStatus | None, Query(alias="status")] = None,
     service: str | None = None,
     severity: Severity | None = None,
@@ -274,6 +276,7 @@ async def list_incidents(
 
 @incidents_router.get("/{incident_id}", response_model=IncidentDetail)
 async def get_incident(incident_id: str, request: Request) -> IncidentDetail:
+    get_current_user(request)
     incident = await _load(request, incident_id)
     related = await _repo(request).get_related_incidents(incident_id)
     return IncidentDetail.of(incident, related=related)
@@ -281,6 +284,7 @@ async def get_incident(incident_id: str, request: Request) -> IncidentDetail:
 
 @incidents_router.get("/{incident_id}/evidence", response_model=list[EvidenceOut])
 async def get_evidence(incident_id: str, request: Request) -> list[EvidenceOut]:
+    get_current_user(request)
     evidence = await _repo(request).get_evidence(incident_id)
     if evidence is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"incident {incident_id!r} not found")
@@ -289,6 +293,7 @@ async def get_evidence(incident_id: str, request: Request) -> list[EvidenceOut]:
 
 @incidents_router.get("/{incident_id}/history", response_model=list[TransitionOut])
 async def get_history(incident_id: str, request: Request) -> list[TransitionOut]:
+    get_current_user(request)
     history = await _repo(request).get_history(incident_id)
     if history is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"incident {incident_id!r} not found")
@@ -296,12 +301,16 @@ async def get_history(incident_id: str, request: Request) -> list[TransitionOut]
 
 
 @incidents_router.post("/{incident_id}/acknowledge", response_model=IncidentDetail)
-async def acknowledge(incident_id: str, request: Request) -> IncidentDetail:
+async def acknowledge(
+    incident_id: str,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_role("approver"))],
+) -> IncidentDetail:
     updated = await _transition(
         request,
         incident_id,
         IncidentStatus.ACKNOWLEDGED,
-        actor="api",
+        actor=user.username,
         reason="acknowledged via API",
     )
     return IncidentDetail.of(updated)
@@ -309,16 +318,26 @@ async def acknowledge(incident_id: str, request: Request) -> IncidentDetail:
 
 @incidents_router.post("/{incident_id}/resolve", response_model=IncidentDetail)
 async def resolve(
-    incident_id: str, request: Request, body: ResolveRequest | None = None
+    incident_id: str,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_role("approver"))],
+    body: ResolveRequest | None = None,
 ) -> IncidentDetail:
     body = body or ResolveRequest()
     updated = await _transition(
-        request, incident_id, IncidentStatus.RESOLVED, actor=body.actor, reason=body.reason
+        request, incident_id, IncidentStatus.RESOLVED, actor=user.username, reason=body.reason
     )
     return IncidentDetail.of(updated)
 
 
 @incidents_router.post("/{incident_id}/transition", response_model=IncidentDetail)
-async def transition(incident_id: str, body: TransitionRequest, request: Request) -> IncidentDetail:
-    updated = await _transition(request, incident_id, body.to, actor=body.actor, reason=body.reason)
+async def transition(
+    incident_id: str,
+    body: TransitionRequest,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_role("approver"))],
+) -> IncidentDetail:
+    updated = await _transition(
+        request, incident_id, body.to, actor=user.username, reason=body.reason
+    )
     return IncidentDetail.of(updated)

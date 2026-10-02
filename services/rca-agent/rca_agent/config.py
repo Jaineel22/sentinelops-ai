@@ -26,6 +26,13 @@ class AppSettings(BaseSettings):
     log_level: str = "INFO"
 
 
+class AuthSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    secret_key: SecretStr = Field(validation_alias="JWT_SECRET_KEY")
+    algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+
+
 class KafkaSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="KAFKA_", env_file=".env", extra="ignore")
 
@@ -122,6 +129,7 @@ class Settings(BaseSettings):
     llm: LlmSettings = Field(default_factory=LlmSettings)
     rca: RcaSettings = Field(default_factory=RcaSettings)
     otel: OTelSettings = Field(default_factory=OTelSettings)
+    auth: AuthSettings = Field(default_factory=lambda: AuthSettings())  # type: ignore[call-arg]
 
 
 @lru_cache

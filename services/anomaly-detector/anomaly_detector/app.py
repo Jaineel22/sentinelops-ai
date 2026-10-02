@@ -12,9 +12,10 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 import httpx
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from anomaly_detector import __version__
@@ -23,6 +24,7 @@ from anomaly_detector.metrics import get_metrics
 from anomaly_detector.runner import DetectorRunner
 from anomaly_detector.state import DetectorState, assess_health
 from anomaly_detector.training import ensure_detector, get_detector_source
+from sentinelops_common.auth import AuthConfig, AuthenticatedUser, get_current_user, init_auth
 from sentinelops_common.kafka import KafkaJsonProducer, ensure_topics
 from sentinelops_common.obs import configure_observability, shutdown_observability
 
@@ -98,6 +100,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    app.state.auth_config = init_auth(
+        AuthConfig(secret_key=settings.auth.secret_key, algorithm=settings.auth.algorithm)
+    )
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -149,7 +154,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/ready/stats")
-    def ready_stats(request: Request) -> Response:
+    def ready_stats(
+        request: Request,
+        _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    ) -> Response:
         body, _ = _readiness(request)
         stats = {
             "inference_stats": body["inference_stats"],
@@ -160,7 +168,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(json.dumps(stats).encode(), media_type="application/json")
 
     @app.get("/model-info")
-    def model_info(request: Request) -> Response:
+    def model_info(
+        request: Request,
+        _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    ) -> Response:
         detector = getattr(request.app.state, "detector", None)
         if detector is None:
             return Response(

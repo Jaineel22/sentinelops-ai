@@ -39,6 +39,7 @@ from rca_agent.llm.base import LlmClient
 from rca_agent.metrics import get_metrics
 from rca_agent.repository import InvestigationRepository
 from rca_agent.tools import build_registry
+from sentinelops_common.auth import AuthConfig, init_auth
 from sentinelops_common.kafka import KafkaJsonProducer, ensure_topics
 from sentinelops_common.obs import configure_observability, shutdown_observability
 
@@ -102,6 +103,9 @@ def create_app(
         )
 
         app.state.settings = settings
+        app.state.auth_config = init_auth(
+            AuthConfig(secret_key=settings.auth.secret_key, algorithm=settings.auth.algorithm)
+        )
         app.state.repository = repo
         app.state.database = database
         app.state.service = service
