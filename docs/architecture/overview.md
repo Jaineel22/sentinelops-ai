@@ -460,7 +460,7 @@ tests.
 | `ml/` | ML anomaly-detection subsystem: collection, data, features, models, evaluation, experiments, inference (Phase 2). |
 | `artifacts/` | `reports/` (committed experiment results), `models/` (git-ignored). |
 | `scripts/` | Developer utilities: `generate_traffic.py`, `incident_scenario.py` (Phase 3 demo), `rca_scenario.py` / `rca_e2e_scenario.py` (Phase 4 demos), `remediation_e2e_scenario.py` (Phase 5 full-chain demo), `phase6_e2e_demo.py` (Phase 6), `phase7_verify.py` (Phase 7), `phase9_verify.py` (Phase 9). |
-| `infrastructure/` | `monitoring/` — Prometheus scrape config + Grafana provisioning + dashboards (Phase 7). `kubernetes/`, `terraform/` are Phase 11. |
+| `infrastructure/` | `monitoring/` — Prometheus scrape config + Grafana provisioning + dashboards (Phase 7). `kubernetes/`, `helm/`, and `terraform/` provide the Phase 11 deployment foundation. |
 | `tests/` | Tests, one subpackage per component (`tests/orders_service/`, `tests/ml/`). |
 | `docs/` | `architecture/`, `decisions/` (ADRs), `development/`, `phases/`. |
 

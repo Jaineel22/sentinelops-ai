@@ -461,7 +461,14 @@ incident RBAC and run in CI. The live RCA walkthrough is available through
 `scripts/live_rca_demo.sh`, with setup and honest mock/live behavior documented
 in `docs/demo.md`.
 
-## Phase 11 — Orchestration, cloud, IaC, hardened CI/CD — planned
+## Phase 11 — Orchestration, cloud, IaC, hardened CI/CD — foundation delivered
 
-Kubernetes manifests/Helm; AWS as target cloud; Terraform modules; CI/CD
-extended to build, scan, publish, and deploy.
+Raw Kubernetes manifests and a values-driven Helm chart cover the application,
+Kafka, PostgreSQL, ingress, HPAs, and retraining CronJob. Kind bootstrap and a
+pull-request E2E workflow build/load the same images used by local development.
+Terraform modules cover the VPC, EKS, RDS PostgreSQL, S3 MLflow artifacts,
+ECR, and IRSA with cost-conscious defaults. CI includes Terraform
+fmt/validation, Trivy image scanning, and an OIDC-based protected EKS deploy
+workflow. k6 scenarios and deployment/cost documentation are in
+`docs/deployment/`; measured load results remain explicitly pending until a
+real environment is run.

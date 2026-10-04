@@ -1,0 +1,12 @@
+variable "aws_region" {type = string, default = "us-east-1"}
+variable "project_name" {type = string, default = "sentinelops"}
+variable "environment" {type = string, default = "prod"}
+variable "vpc_cidr" {type = string, default = "10.0.0.0/16"}
+variable "db_name" {type = string, default = "sentinelops"}
+variable "db_username" {type = string, default = "sentinelops"}
+variable "db_password" {type = string, sensitive = true}
+variable "cluster_version" {type = string, default = "1.29"}
+variable "node_instance_type" {type = string, default = "t3.medium"}
+variable "node_min_size" {type = number, default = 1}
+variable "node_max_size" {type = number, default = 3}
+variable "service_accounts" {type = set(string), default = ["sentinelops"]}

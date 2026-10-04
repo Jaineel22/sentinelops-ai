@@ -1,0 +1,195 @@
+{{- $ns := .Values.namespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels: {{ include "sentinelops.labels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: sentinelops-config, namespace: {{ $ns }}}
+data:
+  KAFKA_BOOTSTRAP_SERVERS: {{ .Values.config.kafkaBootstrapServers | quote }}
+  DB_NAME: {{ .Values.config.dbName | quote }}
+  RCA_MODE: {{ .Values.config.rcaMode | quote }}
+  LLM_PROVIDER: {{ .Values.config.llmProvider | quote }}
+  APP_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  RCA_INCIDENT_API_BASE_URL: http://incident-correlator:8000
+  INCIDENT_API_URL: http://incident-correlator:8000
+  RCA_API_URL: http://rca-agent:8000
+  REMEDIATION_API_URL: http://remediation-controller:8000
+  DETECTOR_API_URL: http://anomaly-detector:8000
+  AUTH_API_URL: http://api:8000
+---
+{{- if .Values.secrets.create }}
+apiVersion: v1
+kind: Secret
+metadata: {name: sentinelops-secrets, namespace: {{ $ns }}}
+type: Opaque
+stringData:
+  JWT_SECRET_KEY: {{ .Values.secrets.jwtSecretKey | quote }}
+  DB_USERNAME: {{ .Values.secrets.dbUsername | quote }}
+  DB_PASSWORD: {{ .Values.secrets.dbPassword | quote }}
+  LLM_API_KEY: {{ .Values.secrets.llmApiKey | quote }}
+---
+{{- end }}
+{{- $services := dict
+  "api" (dict "image" .Values.images.api "port" 8000 "health" "/health" "resource" .Values.resources.small)
+  "orders-service" (dict "image" .Values.images.ordersService "port" 8000 "health" "/health" "resource" .Values.resources.small)
+  "anomaly-detector" (dict "image" .Values.images.anomalyDetector "port" 8000 "health" "/health" "resource" .Values.resources.ml)
+  "incident-correlator" (dict "image" .Values.images.incidentCorrelator "port" 8000 "health" "/health" "resource" .Values.resources.small)
+  "rca-agent" (dict "image" .Values.images.rcaAgent "port" 8000 "health" "/health" "resource" .Values.resources.ml)
+  "remediation-controller" (dict "image" .Values.images.remediationController "port" 8000 "health" "/health" "resource" .Values.resources.small)
+  "frontend" (dict "image" .Values.images.frontend "port" 3000 "health" "/login" "resource" .Values.resources.small) }}
+{{- range $name, $cfg := $services }}
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ $name }}, namespace: {{ $ns }}}
+spec:
+  replicas: {{ $.Values.replicaCount }}
+  selector: {matchLabels: {app: {{ $name | quote }}}}
+  template:
+    metadata: {labels: {app: {{ $name | quote }}}}
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: "{{ $cfg.image.repository }}:{{ $cfg.image.tag }}"
+          imagePullPolicy: {{ $.Values.imagePullPolicy }}
+          ports: [{name: http, containerPort: {{ $cfg.port }} }]
+          envFrom:
+            - configMapRef: {name: sentinelops-config}
+            - secretRef: {name: sentinelops-secrets, optional: true}
+          env:
+            - name: DB_URL
+              value: "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@postgres:5432/$(DB_NAME)"
+            - name: DB_TEST_URL
+              value: "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@postgres:5432/$(DB_NAME)"
+          resources: {{ toYaml $cfg.resource | nindent 12 }}
+          livenessProbe: {httpGet: {path: {{ $cfg.health }}, port: http}, initialDelaySeconds: 30}
+          readinessProbe: {httpGet: {path: {{ $cfg.health }}, port: http}, initialDelaySeconds: 10}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $name }}, namespace: {{ $ns }}}
+spec: {selector: {app: {{ $name | quote }}}, ports: [{name: http, port: {{ $cfg.port }}, targetPort: http}]}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: kafka, namespace: {{ $ns }}}
+spec:
+  serviceName: kafka-headless
+  replicas: 1
+  selector: {matchLabels: {app: kafka}}
+  template:
+    metadata: {labels: {app: kafka}}
+    spec:
+      containers:
+        - name: kafka
+          image: "{{ .Values.images.kafka.repository }}:{{ .Values.images.kafka.tag }}"
+          ports: [{name: kafka, containerPort: 9092}]
+          env:
+            - {name: KAFKA_NODE_ID, value: "1"}
+            - {name: KAFKA_PROCESS_ROLES, value: broker,controller}
+            - {name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: 1@localhost:9093}
+            - {name: KAFKA_LISTENERS, value: PLAINTEXT://:9092,CONTROLLER://:9093}
+            - {name: KAFKA_ADVERTISED_LISTENERS, value: PLAINTEXT://kafka:9092}
+            - {name: KAFKA_CONTROLLER_LISTENER_NAMES, value: CONTROLLER}
+            - {name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT}
+            - {name: KAFKA_INTER_BROKER_LISTENER_NAME, value: PLAINTEXT}
+            - {name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1"}
+          volumeMounts: [{name: data, mountPath: /var/lib/kafka/data}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: ["ReadWriteOnce"], resources: {requests: {storage: {{ .Values.storage.kafka }}}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: kafka-headless, namespace: {{ $ns }}}
+spec: {clusterIP: None, selector: {app: kafka}, ports: [{name: kafka, port: 9092}]}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: postgres, namespace: {{ $ns }}}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: "{{ .Values.images.postgres.repository }}:{{ .Values.images.postgres.tag }}"
+          ports: [{name: postgres, containerPort: 5432}]
+          env:
+            - {name: POSTGRES_USER, valueFrom: {secretKeyRef: {name: sentinelops-secrets, key: DB_USERNAME}}}
+            - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: sentinelops-secrets, key: DB_PASSWORD}}}
+            - {name: POSTGRES_DB, valueFrom: {configMapKeyRef: {name: sentinelops-config, key: DB_NAME}}}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: ["ReadWriteOnce"], resources: {requests: {storage: {{ .Values.storage.postgres }}}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres, namespace: {{ $ns }}}
+spec: {selector: {app: postgres}, ports: [{name: postgres, port: 5432}]}
+---
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: sentinelops, namespace: {{ $ns }}}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - {path: /api, pathType: Prefix, backend: {service: {name: api, port: {number: 8000}}}}
+          - {path: /, pathType: Prefix, backend: {service: {name: frontend, port: {number: 3000}}}}
+  {{- if .Values.ingress.tls }}
+  tls: [{hosts: [{{ .Values.ingress.host }}], secretName: {{ .Values.ingress.tlsSecret }}}]
+  {{- end }}
+---
+{{- end }}
+{{- if .Values.hpa.api.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: api, namespace: {{ $ns }}}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: api}
+  minReplicas: {{ .Values.hpa.api.minReplicas }}
+  maxReplicas: {{ .Values.hpa.api.maxReplicas }}
+  metrics: [{type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: {{ .Values.hpa.api.cpu }}}}}]
+---
+{{- end }}
+{{- if .Values.hpa.anomalyDetector.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: anomaly-detector, namespace: {{ $ns }}}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: anomaly-detector}
+  minReplicas: {{ .Values.hpa.anomalyDetector.minReplicas }}
+  maxReplicas: {{ .Values.hpa.anomalyDetector.maxReplicas }}
+  metrics: [{type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: {{ .Values.hpa.anomalyDetector.cpu }}}}}]
+---
+{{- end }}
+{{- if .Values.retraining.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: retraining, namespace: {{ $ns }}}
+spec:
+  schedule: {{ .Values.retraining.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: retraining
+              image: "{{ .Values.images.anomalyDetector.repository }}:{{ .Values.images.anomalyDetector.tag }}"
+              command: ["python", "-m", "ml.mlops", "retrain"]
+              envFrom: [{configMapRef: {name: sentinelops-config}}, {secretRef: {name: sentinelops-secrets, optional: true}}]
+{{- end }}

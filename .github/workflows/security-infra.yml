@@ -1,0 +1,48 @@
+name: Security and infrastructure
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+        working-directory: infrastructure/terraform
+      - run: terraform init -backend=false
+        working-directory: infrastructure/terraform
+      - run: terraform validate
+        working-directory: infrastructure/terraform
+
+  trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          docker build -t sentinelops-api:ci .
+          docker build -f apps/orders-service/Dockerfile -t sentinelops-orders:ci .
+          docker build -f services/anomaly-detector/Dockerfile -t sentinelops-detector:ci .
+          docker build -f services/incident-correlator/Dockerfile -t sentinelops-incident:ci .
+          docker build -f services/rca-agent/Dockerfile -t sentinelops-rca:ci .
+          docker build -f services/remediation-controller/Dockerfile -t sentinelops-remediation:ci .
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: sentinelops-api:ci
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Scan remaining images
+        run: |
+          for image in sentinelops-orders sentinelops-detector sentinelops-incident sentinelops-rca sentinelops-remediation; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.59.1 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$image:ci"
+          done

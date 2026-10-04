@@ -13,6 +13,7 @@ PY := $(BIN)/python
 .DEFAULT_GOAL := help
 
 .PHONY: help venv install test test-integration lint format typecheck check \
+        helm-lint helm-template k8s-apply load-test-api load-test-detection load-test-rca \
         run run-orders traffic \
         compose-up compose-down compose-logs \
         docker-build docker-build-orders \
@@ -58,6 +59,24 @@ typecheck: ## Static type-check with mypy
 	$(PY) -m mypy
 
 check: lint typecheck test ## Run all quality gates
+
+helm-lint: ## Validate the Helm chart
+	helm lint infrastructure/helm/sentinelops
+
+helm-template: ## Render the development Helm chart
+	helm template sentinelops infrastructure/helm/sentinelops -f infrastructure/helm/sentinelops/values-dev.yaml
+
+k8s-apply: ## Apply the raw Kubernetes manifests
+	kubectl apply --server-side --namespace sentinelops -f infrastructure/kubernetes/
+
+load-test-api: ## Run the authenticated API k6 flow
+	k6 run tests/load/api.js
+
+load-test-detection: ## Run the telemetry ingestion k6 flow
+	k6 run tests/load/incident-detection.js
+
+load-test-rca: ## Run the RCA health/load k6 flow
+	k6 run tests/load/rca.js
 
 run: ## Run the SentinelOps platform API locally (:8000)
 	$(PY) -m uvicorn sentinelops_api.main:app --reload --app-dir apps/api

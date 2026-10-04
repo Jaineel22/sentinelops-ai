@@ -1,0 +1,38 @@
+namespace: sentinelops
+images:
+  api: {repository: sentinelops-ai/api, tag: latest}
+  ordersService: {repository: sentinelops-ai/orders-service, tag: latest}
+  anomalyDetector: {repository: sentinelops-ai/anomaly-detector, tag: latest}
+  incidentCorrelator: {repository: sentinelops-ai/incident-correlator, tag: latest}
+  rcaAgent: {repository: sentinelops-ai/rca-agent, tag: latest}
+  remediationController: {repository: sentinelops-ai/remediation-controller, tag: latest}
+  frontend: {repository: sentinelops-ai/frontend, tag: latest}
+  kafka: {repository: apache/kafka, tag: "3.9.1"}
+  postgres: {repository: postgres, tag: "17-alpine"}
+  mlflow: {repository: sentinelops-ai/mlflow, tag: latest}
+imagePullPolicy: IfNotPresent
+replicaCount: 1
+resources:
+  small: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 512Mi}}
+  ml: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 500m, memory: 1Gi}}
+config:
+  kafkaBootstrapServers: kafka:9092
+  dbName: sentinelops
+  rcaMode: mock
+  llmProvider: anthropic
+  logLevel: INFO
+secrets:
+  create: true
+  jwtSecretKey: replace-me
+  dbUsername: sentinelops
+  dbPassword: replace-me
+  llmApiKey: ""
+ingress: {enabled: false, className: nginx, host: sentinelops.local, tls: false, tlsSecret: sentinelops-tls}
+hpa:
+  api: {enabled: true, minReplicas: 1, maxReplicas: 5, cpu: 70}
+  anomalyDetector: {enabled: true, minReplicas: 1, maxReplicas: 3, cpu: 70}
+storage:
+  kafka: 10Gi
+  postgres: 20Gi
+  mlflow: 20Gi
+retraining: {enabled: true, schedule: "0 2 * * *"}

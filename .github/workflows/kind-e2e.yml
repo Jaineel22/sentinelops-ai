@@ -1,0 +1,24 @@
+name: Kind E2E
+on: {pull_request: {}}
+permissions: {contents: read}
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1.10.0
+      - uses: azure/setup-helm@v4
+      - name: Build local images
+        run: |
+          docker build -t sentinelops-ai/api:latest .
+          docker build -f apps/orders-service/Dockerfile -t sentinelops-ai/orders-service:latest .
+          docker build -f services/anomaly-detector/Dockerfile -t sentinelops-ai/anomaly-detector:latest .
+          docker build -f services/incident-correlator/Dockerfile -t sentinelops-ai/incident-correlator:latest .
+          docker build -f services/rca-agent/Dockerfile -t sentinelops-ai/rca-agent:latest .
+          docker build -f services/remediation-controller/Dockerfile -t sentinelops-ai/remediation-controller:latest .
+      - name: Install chart
+        run: |
+          kind load docker-image sentinelops-ai/api:latest sentinelops-ai/orders-service:latest sentinelops-ai/anomaly-detector:latest sentinelops-ai/incident-correlator:latest sentinelops-ai/rca-agent:latest sentinelops-ai/remediation-controller:latest
+          helm upgrade --install sentinelops infrastructure/helm/sentinelops -n sentinelops --create-namespace -f infrastructure/helm/sentinelops/values-dev.yaml
+      - run: kubectl wait --for=condition=available deployment/api -n sentinelops --timeout=180s
+      - run: kubectl get pods -n sentinelops

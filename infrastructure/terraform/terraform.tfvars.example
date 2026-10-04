@@ -1,0 +1,4 @@
+aws_region = "us-east-1"
+project_name = "sentinelops"
+environment = "prod"
+db_password = "replace-with-a-secret-manager-value"

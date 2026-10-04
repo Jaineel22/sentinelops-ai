@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentinelops-config
+  namespace: sentinelops
+data:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: sentinelops
+  RCA_INCIDENT_API_BASE_URL: http://incident-correlator:8000
+  INCIDENT_API_URL: http://incident-correlator:8000
+  RCA_API_URL: http://rca-agent:8000
+  REMEDIATION_API_URL: http://remediation-controller:8000
+  DETECTOR_API_URL: http://anomaly-detector:8000
+  AUTH_API_URL: http://api:8000
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  RCA_MODE: mock
+  LLM_PROVIDER: anthropic
+  APP_LOG_LEVEL: INFO

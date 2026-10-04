@@ -702,14 +702,22 @@ frontend-{install,dev,build,lint}`. Details:
 [docs/phase10-summary.md](docs/phase10-summary.md) ·
 [apps/frontend/README.md](apps/frontend/README.md).
 
+### Phase 11 — Deployment foundation *(in progress)*
+
+Phase 11 now includes raw Kubernetes manifests, a values-driven Helm chart,
+Kind bootstrap, cost-conscious Terraform modules for VPC/EKS/RDS/S3/ECR/IRSA,
+Trivy and Terraform CI, an OIDC-based EKS deployment workflow, Kind E2E
+validation, and k6 scenarios. Start with
+[the Kubernetes guide](docs/deployment/kubernetes.md) and
+[the Terraform guide](docs/deployment/terraform.md). Cloud, cluster, and load
+tests are intentionally not claimed as run unless their tools and credentials
+are available.
+
 **Not implemented** (later phases): the full observability stack — Loki (logs) /
 Tempo (traces) / an OTel collector / cross-service instrumentation beyond the
-anomaly-detector; Kubernetes, AWS, Terraform,
-hardened CI/CD (Phase 11); real-infrastructure remediation executors and
+anomaly-detector; real-infrastructure remediation executors and
 autonomous remediation (out of scope by design —
 [ADR-003](docs/decisions/adr-003-human-in-the-loop-remediation.md));
 autonomous / scheduled retraining (Phase 6 is CLI-driven by design);
-authentication on the incident / RCA / remediation / detector services
-themselves (a deliberate scope boundary — see Phase 10.1's scope note above);
 incident merging and topology **discovery** (Phase 8 links are advisory, over a
 hand-declared graph).

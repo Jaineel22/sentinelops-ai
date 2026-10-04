@@ -1,0 +1,10 @@
+replicaCount: 2
+imagePullPolicy: IfNotPresent
+images:
+  api: {repository: ACCOUNT.dkr.ecr.REGION.amazonaws.com/sentinelops-api, tag: latest}
+  frontend: {repository: ACCOUNT.dkr.ecr.REGION.amazonaws.com/sentinelops-frontend, tag: latest}
+secrets: {create: false}
+ingress: {enabled: true, className: nginx, host: sentinelops.example.com, tls: true, tlsSecret: sentinelops-tls}
+hpa:
+  api: {enabled: true, minReplicas: 2, maxReplicas: 5, cpu: 70}
+  anomalyDetector: {enabled: true, minReplicas: 2, maxReplicas: 3, cpu: 70}

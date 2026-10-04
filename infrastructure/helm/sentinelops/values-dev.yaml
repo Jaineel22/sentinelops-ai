@@ -1,0 +1,7 @@
+replicaCount: 1
+imagePullPolicy: IfNotPresent
+secrets: {create: true, jwtSecretKey: local-kind-secret-change-me, dbUsername: sentinelops, dbPassword: sentinelops, llmApiKey: ""}
+ingress: {enabled: false}
+resources:
+  small: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 250m, memory: 256Mi}}
+  ml: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 512Mi}}

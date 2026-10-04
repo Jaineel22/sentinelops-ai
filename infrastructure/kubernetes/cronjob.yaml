@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: retraining, namespace: sentinelops}
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: retraining
+              image: sentinelops-ai/ml:latest
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "ml.mlops", "retrain"]
+              envFrom:
+                - configMapRef: {name: sentinelops-config}
+                - secretRef: {name: sentinelops-secrets}
