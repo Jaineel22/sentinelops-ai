@@ -442,9 +442,10 @@ dashboard / incident-detail / remediation panel now auto-refresh (10 s / 15 s /
 HTTP, not just unit tests); RBAC hierarchy enforced both server-side
 (`/register` returns 403 for viewer/approver, 201 for admin) and in the
 dashboard UI; 16 new tests (`tests/test_auth.py`) pass; the frontend CI job
-lints/typechecks/builds; auto-refresh intervals clean up on unmount; the full
-Python suite + Ruff + mypy still pass; no change to the incident/RCA/
-remediation/detector services.
+lints/typechecks/builds; auto-refresh intervals clean up on unmount. Phase
+10.2 subsequently added shared enforcement to the incident/RCA/remediation/
+detector services; legacy unauthenticated service tests still require fixture
+migration before the historical full Python suite is green.
 
 ### Phase 10.2 — Security hardening & frontend tests — done (2026-10-02)
 

@@ -13,8 +13,10 @@ Pydantic models field-for-field, and the four services (incident-correlator
 `:8002`, anomaly-detector `:8003`, rca-agent `:8004`, remediation-controller
 `:8005`), which have no CORS and no `/api/v1` gateway, are reached through
 **Next.js server-side proxy rewrites** under one same-origin `/api/*` prefix.
-The approval flow records an explicit `approver_identity` + `approver_role` +
-`reason` and posts them to the existing endpoint. A follow-up hardening pass
+The approval form collects an approval reason and posts it to the existing
+endpoint. The backend now derives the effective approver identity and role from
+the signed JWT rather than trusting those legacy request-body fields. A
+follow-up hardening pass
 (**Phase 10.1**, below) added a real JWT login + RBAC gate to the dashboard
 itself; Phase 10.2 extends the same bearer token validation to all four backend
 services and keeps only health/metrics public.
@@ -96,11 +98,11 @@ data-fetching library — client components with `fetch` + hooks.
 - **`npm run lint`** (`next lint`) — clean.
 - **`npm run typecheck`** (`tsc --noEmit`, strict + `noUncheckedIndexedAccess`)
   — clean.
-- **Python side** — `apps/api` gained real Python (auth.py, routes/auth.py,
-  16 new tests in `tests/test_auth.py`); the other 4 services are still
-  untouched. `pytest -q` → **1086 passed, 18 deselected** (was 1070; +16, all
-  in `test_auth.py`). `ruff check`/`format --check` and `mypy` (348 files) all
-  green.
+- **Python side** — shared authentication was added to the platform API and
+  four data-plane services, with cross-service contract coverage in
+  `tests/test_auth_integration.py`. Targeted auth/shared-library tests and
+  Ruff/format/mypy checks passed. The historical full suite is not yet green:
+  legacy unauthenticated service tests need bearer-token fixture updates.
 - **Live end-to-end**: `apps/api` started locally, the built frontend proxied
   `POST /api/auth/login` and `GET /api/auth/me` through to it — real tokens,
   real role, verified over HTTP, not just unit-tested.
@@ -153,3 +155,18 @@ The frontend attaches the bearer token to data-plane calls and adds Jest +
 Testing Library coverage for auth, route guarding, remediation RBAC, and
 incident RBAC. The live Anthropic walkthrough is in `docs/demo.md` and uses
 `scripts/live_rca_demo.sh`; mock RCA remains the default.
+
+## Phase 11 deployment foundation
+
+Phase 11 documentation and configuration are maintained separately from this
+frontend summary:
+
+- [Kubernetes/Kind deployment](deployment/kubernetes.md)
+- [EKS deployment](deployment/eks.md)
+- [Terraform infrastructure](deployment/terraform.md)
+- [Load testing](deployment/load-testing.md)
+- [Cost guidance](deployment/costs.md)
+
+These documents distinguish static configuration validation from live execution.
+No cloud resources, cluster status, or performance metrics are claimed without
+an actual run.

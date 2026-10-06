@@ -4,8 +4,7 @@
 > JWT
 > login + RBAC, a frontend CI job, and dashboard auto-refresh. `apps/frontend/`
 > is a Next.js 15 / React 19 / Tailwind dashboard over the existing internal
-> APIs plus one small, additive backend change (`apps/api`'s new auth routes —
-> the incident/RCA/remediation/detector services are still untouched). One-line
+> APIs plus shared JWT enforcement across the data-plane services. One-line
 > recap: [../phase10-summary.md](../phase10-summary.md) ·
 > [../../apps/frontend/README.md](../../apps/frontend/README.md).
 >
@@ -252,9 +251,10 @@ fail closed, not just "trust the JWT claims forever."
   expired token, `/register` RBAC for viewer/approver/admin, duplicate
   username, no-token register, and the full admin-outranks-approver-outranks-
   viewer hierarchy over HTTP).
-- **Full suite**: `pytest -q` → **1086 passed, 18 deselected** (was 1070 before
-  10.1; +16, all in `test_auth.py`). `ruff check` / `ruff format --check` /
-  `mypy` all green (348 source files).
+- **Targeted auth/shared-library tests** pass, and `ruff check`,
+  `ruff format --check`, and `mypy` pass. The historical full suite is not yet
+  green because legacy service API tests still need authenticated request
+  fixtures after Phase 10.2 protection was added.
 - **Live end-to-end**: started `apps/api` and the built frontend, then curled
   through the Next proxy — `POST /api/auth/login` and `GET /api/auth/me` both
   round-tripped real tokens and the correct role, confirming the proxy +

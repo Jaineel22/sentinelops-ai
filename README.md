@@ -1,10 +1,10 @@
 # SentinelOps AI
 
-> **Current status: Phase 10 — Frontend MVP, incl. 10.1 auth/RBAC/CI hardening (complete).**
-> Phases 0–10 are implemented and tested (see [Current status](#current-status)).
-> The full observability stack (Loki, Tempo, cross-service OTel) and Phase 11
-> (orchestration / cloud / IaC) under [Planned architecture](#planned-architecture)
-> and [Technology roadmap](#technology-roadmap) are future work and labelled as such.
+> **Current status: Phase 11 deployment foundation delivered.**
+> Phases 0–10 are implemented; Phase 11 infrastructure, Helm, Terraform,
+> security CI, deployment workflows, and load-test scenarios are present.
+> Local/cloud execution remains environment-dependent and is reported
+> explicitly rather than implied by the documentation.
 
 ## Live LLM Demo
 
@@ -90,16 +90,20 @@ the ML component ([ADR-002](docs/decisions/adr-002-ml-and-llm-separation.md)):
   root cause and a remediation category. It never detects, never correlates, and
   never executes.
 
-## Planned architecture
+## Architecture
 
-> Target design. **Phases 0–10 exist and are tested** (the Kafka backbone,
+> Current design plus explicitly labelled future work. **Phases 0–10 exist and
+> are tested** (the Kafka backbone,
 > `orders-service`, live anomaly detection, incident correlation + PostgreSQL,
 > cross-service incident correlation, the LangGraph RCA agent, human-approved
 > remediation with audit + recovery verification, the MLflow-backed MLOps
 > lifecycle, real-time inference observability with Prometheus + Grafana, and a
 > Next.js operator dashboard). The full observability stack (Loki, Tempo,
 > cross-service OTel collection) and orchestration / cloud / IaC (Phase 11) are
-> future work. See [Current status](#current-status).
+> Phase 11 adds Kubernetes/Helm packaging, AWS/EKS Terraform modules, and
+> deployment automation. Loki, Tempo, cross-service OTel collection, and
+> production-grade secret management remain future work. See
+> [Current status](#current-status).
 
 ```mermaid
 flowchart LR
@@ -177,10 +181,13 @@ Introduced **only in the phase that needs it**, never earlier:
 | **8** | Incident Engine — cross-service correlation via a static service-dependency graph; `incident_relations` table; linked incidents on the Incident API | **done** |
 | **9** | AI Root Cause Agent — the Phase 4 build ([phase-9.md](docs/architecture/phase-9.md)): LangGraph investigation engine, closed read-only evidence tools, mock/live LLM boundary, Investigation API + `incident.opened` consumer | **done** |
 | **10** | Frontend MVP — Next.js/React/Tailwind operator dashboard ([phase-10.md](docs/architecture/phase-10.md)): incident list/detail, evidence, cross-service links, RCA report, human remediation approval, model provenance; **10.1** adds JWT login + RBAC (`apps/api`), a frontend CI job, and auto-refresh | **done** |
-| 11 | Kubernetes, cloud (AWS), Terraform, hardened CI/CD | planned |
+| **11** | Kubernetes, cloud (AWS), Terraform, hardened CI/CD, and load-test scenarios | **foundation delivered** |
 
 The roadmap is a direction, not a contract; later phases may re-scope earlier
-ones. See [docs/phases/roadmap.md](docs/phases/roadmap.md).
+ones. “Foundation delivered” means the code and configuration are present;
+live Kind, AWS, and k6 execution still require the corresponding local tools,
+credentials, and runtime dependencies. See
+[docs/phases/roadmap.md](docs/phases/roadmap.md).
 
 ## Development
 
@@ -677,17 +684,16 @@ Read-mostly, over the **existing** internal APIs — **no backend code changed**
   the RCA report shape, the 9-value investigation status, the 13-value
   remediation status — no invented fields.
 
-**Phase 10.1 (hardening, done)** — a JWT login gate: `apps/api` gained
+**Phase 10.1/10.2 (hardening, done)** — a JWT login gate: `apps/api` gained
 `/api/v1/auth/{login,me,register}` (`pyjwt`, PBKDF2-HMAC hashing, an in-memory
 demo user store — `admin`/`admin123`, `approver`/`approver123`,
 `viewer`/`viewer123`, roles `viewer < approver < admin`), and the dashboard
 gained a login page + `AuthGuard` that blocks every route until the token
 validates. Approve/reject/execute and acknowledge/resolve render only for
-`approver`+. **Scope note:** this protects `apps/api`'s new routes and the
-dashboard UI only — the incident/RCA/remediation/detector services still don't
-check the token, unchanged from Phase 10 (ADR-003: they're internal by
-design); a direct API call still bypasses the login exactly as it could
-before. A `frontend` job was also added to CI (lint/typecheck/build), and the
+`approver`+. The shared bearer token is also enforced by the
+incident/RCA/remediation/detector services on protected routes; health and
+metrics remain public for probes. A `frontend` job was also added to CI
+(lint/typecheck/build), and the
 dashboard/incident-detail/remediation panel now auto-refresh (10s/15s/15s,
 toggleable) instead of requiring a manual refresh.
 
@@ -702,7 +708,7 @@ frontend-{install,dev,build,lint}`. Details:
 [docs/phase10-summary.md](docs/phase10-summary.md) ·
 [apps/frontend/README.md](apps/frontend/README.md).
 
-### Phase 11 — Deployment foundation *(in progress)*
+### Phase 11 — Deployment foundation *(delivered; live execution pending)*
 
 Phase 11 now includes raw Kubernetes manifests, a values-driven Helm chart,
 Kind bootstrap, cost-conscious Terraform modules for VPC/EKS/RDS/S3/ECR/IRSA,

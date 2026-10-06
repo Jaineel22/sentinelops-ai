@@ -8,7 +8,7 @@ tracks what is actually built. It is updated at the end of every phase.
 - **IMPLEMENTED** — exists in the repository and is tested.
 - **PLANNED** — target design; no code yet.
 
-## Current state (through Phase 10)
+## Current state (through Phase 11 foundation)
 
 **IMPLEMENTED**
 
@@ -62,9 +62,10 @@ tracks what is actually built. It is updated at the end of every phase.
   validate the shared JWT on protected routes; health and metrics remain public
   for orchestration (Phase 10.2).
 
-See the per-phase docs. Sections 5, 8, 9, 11 and 12 are implemented; section 10
-(packaging / orchestration) and the deferred parts of 9 (Loki, Tempo,
-cross-service OTel) are **PLANNED**.
+See the per-phase docs. Sections 5, 8, 9, 10, 11 and 12 are implemented or
+partially implemented; Phase 11 provides the Kubernetes/Helm/Terraform and
+delivery foundation. The deferred parts of 9 (Loki, Tempo, cross-service OTel)
+and production identity/secret integrations remain future work.
 
 ## Target architecture
 
@@ -401,34 +402,31 @@ gateway; rather than add CORS middleware everywhere, `next.config.mjs`
 **server-side rewrites** proxy them under one same-origin `/api/*` — no
 cross-origin request, no change to those four services.
 
-**What Phase 10.1 delivers:** `apps/api` (previously just `/health` + `/`)
+**What Phase 10.1 and 10.2 deliver:** `apps/api` (previously just `/health` + `/`)
 gains real JWT auth — `/api/v1/auth/{login,me,register}`
 (`sentinelops_api.auth`; PyJWT, PBKDF2-HMAC hashing, an in-memory demo user
 store, role hierarchy `viewer < approver < admin`) — and the dashboard gains a
 login page + an `AuthGuard` that blocks every route until the token validates.
 Approve/reject/execute and acknowledge/resolve render only for `approver`+.
-**Scope boundary:** the incident/RCA/remediation/detector services *still*
-don't check the token — only `apps/api`'s new routes and the dashboard UI are
-protected; a direct API call bypasses the login exactly as in Phase 10
-(ADR-003: those services are internal by design). Also: a `frontend` CI job
+The incident/RCA/remediation/detector services validate the same bearer token
+on protected routes; health and metrics remain public for orchestration probes.
+Also: a `frontend` CI job
 (`.github/workflows/ci.yml`) and auto-refresh (dashboard 10s, incident detail
 15s, remediation panel 15s, toggleable). Full write-up: [phase-10.md](phase-10.md)
 §9 · [phase10-summary.md](../phase10-summary.md).
 
-**Deferred:** authenticating the incident/RCA/remediation/detector services
-themselves (explicit Phase 10.1 scope boundary, above); persisted user
-accounts / refresh tokens; MLflow metrics / PSI drift in the UI
-(CLI/MLflow-server only); proposing remediations from the UI; frontend unit
-tests.
+**Deferred:** persisted user accounts / refresh tokens; MLflow metrics / PSI
+drift in the UI (CLI/MLflow-server only); proposing remediations from the UI.
+Frontend unit tests are implemented and run in CI.
 
-### 10. Packaging & delivery — PLANNED
+### 10. Packaging & delivery — Phase 11 foundation delivered
 
 - **Docker** / **Docker Compose** for local multi-service development.
-- **Kubernetes** for orchestration.
-- **AWS** as the target cloud.
-- **Terraform** for infrastructure as code.
-- **GitHub Actions** for CI/CD (lint, type-check, test now; build/publish/deploy
-  later).
+- **Kubernetes** for orchestration — raw manifests and Helm chart.
+- **AWS** as the target cloud — EKS/RDS/S3/ECR Terraform modules.
+- **Terraform** for infrastructure as code — fmt/validate CI.
+- **GitHub Actions** for CI/CD — frontend/quality checks, Trivy scanning,
+  Kind E2E, and OIDC-based EKS deployment.
 
 ## Component → phase map
 
