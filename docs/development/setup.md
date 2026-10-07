@@ -47,7 +47,7 @@ python -m pip install -e ".[dev,ml,incident,detector,rca]"
 adds pytest, httpx, Ruff, and mypy; `[ml]` adds pandas, NumPy, scikit-learn,
 SciPy, matplotlib, and joblib (Phase 2); `[incident]` adds SQLAlchemy, asyncpg,
 and Alembic and `[detector]` adds httpx (Phase 3); `[rca]` adds `langgraph` and
-the `anthropic` SDK (Phase 4). Drop extras you don't need.
+the Groq SDK (Phase 4). Drop extras you don't need.
 
 ## 4. Environment configuration
 
@@ -342,7 +342,7 @@ make db-migrate-rca
 make run-rca &                   # :8004  (RCA_MODE=mock)
 
 # Live LLM (opt-in; key stays in your shell, never committed):
-RCA_MODE=live LLM_PROVIDER=anthropic LLM_API_KEY=sk-ant-... docker compose up --build rca-agent
+RCA_MODE=live LLM_PROVIDER=groq LLM_MODEL=llama-3.3-70b-versatile LLM_API_KEY=gsk_... docker compose up --build rca-agent
 ```
 
 Schema changes: edit `services/rca-agent/rca_agent/db/models.py`, then

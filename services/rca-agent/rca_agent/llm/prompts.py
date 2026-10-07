@@ -10,8 +10,8 @@ request to this module, which renders the fixed ADR-021 message architecture via
 
 Everything the model is given that did not originate in our own control plane
 (incident text, tool output, prior proposals) lands in the USER message as
-clearly-labelled data. The provider translates the result into the Anthropic
-wire format — it does not add, reorder, or promote anything.
+clearly-labelled data. The provider translates the result into its API format;
+it does not add, reorder, or promote anything.
 
 Pure string rendering: no network, no model dependency.
 """

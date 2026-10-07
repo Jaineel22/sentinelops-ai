@@ -34,14 +34,14 @@ The optional MLflow, Prometheus, and Grafana services are not needed for the
 faculty demo. MLflow uses host port `5000`, which can conflict with macOS
 Control Center.
 
-## Live Anthropic RCA demo
+## Live Groq RCA demo
 
 ### What it shows
 
 This demo exercises the production-shaped path: controlled latency is injected
 into the orders service, the anomaly detector and incident correlator create an
 incident, and the RCA agent gathers bounded read-only evidence before asking
-Anthropic for a structured root-cause report. No remediation is executed.
+Groq's Llama 3.3 model for a structured root-cause report. No remediation is executed.
 
 ### Setup
 
@@ -49,7 +49,7 @@ Install Docker, Docker Compose, Python 3, and `curl`. Export a provider key and
 a strong shared JWT secret:
 
 ```bash
-export ANTHROPIC_API_KEY=your-key
+export GROQ_API_KEY=your-key
 export JWT_SECRET_KEY="$(openssl rand -hex 32)"
 ```
 
@@ -87,7 +87,7 @@ Live RCA report for incident 8e2...
 
 `RCA_MODE=mock` is the default and uses the deterministic reasoner; it needs no
 network access or API key and is the CI mode. `RCA_MODE=live` selects the same
-bounded investigation graph with `LLM_PROVIDER=anthropic` and
-`LLM_API_KEY=ANTHROPIC_API_KEY`. The model can propose a report, but deterministic
+bounded investigation graph with `LLM_PROVIDER=groq` and
+`LLM_API_KEY=GROQ_API_KEY`. The model can propose a report, but deterministic
 schema validation and the remediation controller's human approval gate remain
 authoritative.

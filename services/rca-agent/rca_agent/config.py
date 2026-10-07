@@ -60,7 +60,7 @@ class DbSettings(BaseSettings):
 class LlmSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LLM_", env_file=".env", extra="ignore")
 
-    provider: str = "mock"  # "mock" | "anthropic" (used only when RCA_MODE=live)
+    provider: str = "groq"  # used only when RCA_MODE=live
     model: str | None = None  # None -> the provider client's default
     api_key: SecretStr | None = None
     base_url: str | None = None

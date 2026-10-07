@@ -19,7 +19,8 @@ config:
   kafkaBootstrapServers: kafka:9092
   dbName: sentinelops
   rcaMode: mock
-  llmProvider: anthropic
+  llmProvider: groq
+  llmModel: llama-3.3-70b-versatile
   logLevel: INFO
 secrets:
   create: true

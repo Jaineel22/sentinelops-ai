@@ -13,6 +13,7 @@ data:
   DB_NAME: {{ .Values.config.dbName | quote }}
   RCA_MODE: {{ .Values.config.rcaMode | quote }}
   LLM_PROVIDER: {{ .Values.config.llmProvider | quote }}
+  LLM_MODEL: {{ .Values.config.llmModel | quote }}
   APP_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   RCA_INCIDENT_API_BASE_URL: http://incident-correlator:8000
   INCIDENT_API_URL: http://incident-correlator:8000

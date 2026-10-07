@@ -24,7 +24,7 @@
 #                              remediation-controller; publishes remediation.events)
 #
 # rca-agent defaults to RCA_MODE=mock — the whole chain runs with NO LLM API key.
-# For a live run: set RCA_MODE=live, LLM_PROVIDER=anthropic and LLM_API_KEY in your
+# For a live run: set RCA_MODE=live, LLM_PROVIDER=groq and LLM_API_KEY in your
 # shell (compose reads it from the environment; it is never committed here).
 #
 #   - mlflow-init         one-shot: create the `mlflow` database on Postgres if missing
@@ -202,7 +202,8 @@ services:
       # mock = deterministic, no LLM API key needed. Override to "live" + set
       # LLM_PROVIDER / LLM_API_KEY for a real provider (ADR-022).
       RCA_MODE: ${RCA_MODE:-mock}
-      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
       LLM_API_KEY: ${LLM_API_KEY:-}
       RCA_INCIDENT_API_BASE_URL: http://incident-correlator:8000
       JWT_SECRET_KEY: ${JWT_SECRET_KEY?error:JWT_SECRET_KEY_not_set}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rca_agent.config import Settings
-from rca_agent.llm.anthropic_client import AnthropicLlmClient
+from rca_agent.llm.groq_client import GroqLlmClient
 from rca_agent.llm.base import (
     AnalysisResult,
     AnalyzeRequest,
@@ -27,7 +27,7 @@ from rca_agent.llm.mock import MockLlmClient
 __all__ = [
     "AnalysisResult",
     "AnalyzeRequest",
-    "AnthropicLlmClient",
+    "GroqLlmClient",
     "LiveLlmNotAvailable",
     "LlmClient",
     "LlmConfigurationError",
@@ -47,7 +47,7 @@ __all__ = [
 ]
 
 # LLM_PROVIDER values this build can construct a live client for.
-_SUPPORTED_LIVE_PROVIDERS = frozenset({"anthropic"})
+_SUPPORTED_LIVE_PROVIDERS = frozenset({"groq"})
 
 
 def build_llm_client(settings: Settings) -> LlmClient:
@@ -69,4 +69,4 @@ def build_llm_client(settings: Settings) -> LlmClient:
             f"RCA_MODE=live needs a supported LLM_PROVIDER "
             f"(one of: {', '.join(sorted(_SUPPORTED_LIVE_PROVIDERS))}); got {provider!r}"
         )
-    return AnthropicLlmClient.from_settings(settings)
+    return GroqLlmClient.from_settings(settings)

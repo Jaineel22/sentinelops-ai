@@ -12,10 +12,10 @@
 
 The default RCA path is deterministic mock mode, so local development and CI
 never require a provider credential. To see the evidence-grounded RCA agent
-using Anthropic:
+using Groq and Llama 3.3:
 
 ```bash
-export ANTHROPIC_API_KEY=your-key
+export GROQ_API_KEY=your-key
 export JWT_SECRET_KEY="$(openssl rand -hex 32)"
 bash scripts/live_rca_demo.sh
 ```
@@ -227,8 +227,8 @@ make phase6-demo           # train champion -> register -> drift -> retrain -> g
 ```
 
 `rca-agent` (`:8004`) defaults to `RCA_MODE=mock` — the whole chain runs with
-**no LLM API key**. For a real provider: `RCA_MODE=live LLM_PROVIDER=anthropic
-LLM_API_KEY=sk-ant-... docker compose up rca-agent` (the key is read from your
+**no LLM API key**. For a real provider: `RCA_MODE=live LLM_PROVIDER=groq
+LLM_MODEL=llama-3.3-70b-versatile LLM_API_KEY=gsk_... docker compose up rca-agent` (the key is read from your
 shell, never committed).
 
 With `make` (Git Bash): `make install`, `make compose-up`, `make db-migrate`,
@@ -257,7 +257,7 @@ sqlite MLflow store),
 [tests/incident_correlator/](tests/incident_correlator/) (correlation, severity,
 state machine, SQL repository, a Kafka→Postgres integration test), and
 [tests/rca_agent/](tests/rca_agent/) (tool registry & bounds, the LangGraph
-engine, mock + Anthropic LLM boundary, prompt-injection defenses, the Kafka
+engine, mock + Groq LLM boundary, prompt-injection defenses, the Kafka
 consumer & idempotency, the Investigation API, an outcome-class RCA harness, and
 a real Kafka+Postgres end-to-end test).
 
@@ -418,7 +418,7 @@ Details: [docs/architecture/phase-3.md](docs/architecture/phase-3.md) ·
 - **Mock / live LLM boundary** — one `LlmClient` protocol with four typed
   operations. `RCA_MODE=mock` (default, CI) is a deterministic, network-free
   reasoner that drives the *real* graph with no API key. `RCA_MODE=live` +
-  `LLM_PROVIDER=anthropic` uses `AnthropicLlmClient` — forced-tool-use structured
+  `LLM_PROVIDER=groq` uses `GroqLlmClient` — forced-tool-use structured
   output parsed into the existing Pydantic DTOs, bounded timeout / prompt size /
   retries, `LLM_API_KEY` as a `SecretStr`. `build_llm_client` never silently
   falls back to mock ([ADR-022](docs/decisions/adr-022-live-llm-provider.md)).
@@ -653,7 +653,7 @@ section above and in [docs/architecture/phase-9.md](docs/architecture/phase-9.md
   a guaranteed-valid `INSUFFICIENT_EVIDENCE` fallback. `RCA_*` budgets checked
   every node. **The LLM proposes; deterministic code decides.**
 - **Mock / live LLM** — `RCA_MODE=mock` (default, CI, no key) drives the real
-  graph deterministically; `RCA_MODE=live LLM_PROVIDER=anthropic` makes one
+  graph deterministically; `RCA_MODE=live LLM_PROVIDER=groq` makes one
   forced-tool-use call per operation. Never a silent mock fallback.
 - **Investigation API + Kafka** — `incident.opened` → idempotent consumer →
   investigation; `POST /investigations`, `GET /investigations/{id}`,

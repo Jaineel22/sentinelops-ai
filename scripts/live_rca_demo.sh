@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY before running this demo}"
+: "${GROQ_API_KEY:?Set GROQ_API_KEY before running this demo}"
 : "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY (for example: openssl rand -hex 32)}"
 
 export RCA_MODE=live
-export LLM_PROVIDER=anthropic
-export LLM_API_KEY="$ANTHROPIC_API_KEY"
+export LLM_PROVIDER=groq
+export LLM_API_KEY="$GROQ_API_KEY"
+export LLM_MODEL="${LLM_MODEL:-llama-3.3-70b-versatile}"
 
 cleanup() {
   if [[ "${KEEP_DEMO_STACK:-0}" != "1" ]]; then
