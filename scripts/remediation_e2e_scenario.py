@@ -29,8 +29,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -76,6 +78,25 @@ from sentinelops_common.kafka import KafkaJsonProducer
 _INCIDENT_ID = "inc_5e2e5e2e5e2e"
 _SERVICE = "orders-service"
 _ABNORMAL = ["error_rate", "latency_p95_ms"]
+
+
+def _demo_auth_headers() -> dict[str, str]:
+    import jwt
+
+    secret = os.environ.get("JWT_SECRET_KEY")
+    if not secret:
+        raise RuntimeError("JWT_SECRET_KEY must be set for the protected remediation demo")
+    token = jwt.encode(
+        {
+            "sub": "demo-admin",
+            "role": "admin",
+            "exp": datetime.now(UTC) + timedelta(minutes=5),
+        },
+        secret,
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
 
 _INCIDENT = {
     "id": _INCIDENT_ID,
@@ -286,6 +307,7 @@ def _operator_body(report: Any, inv: Any) -> dict[str, Any]:
 def _happy_path(report: Any, inv: Any) -> None:
     producer = _CapturingProducer()
     with _client(producer) as client:
+        headers = _demo_auth_headers()
         rca_body = {
             "incident_id": _INCIDENT_ID,
             "incident_severity": "HIGH",
@@ -296,20 +318,20 @@ def _happy_path(report: Any, inv: Any) -> None:
                 "rationale": report.recommended_action.rationale,
             },
         }
-        r = client.post("/remediations", json=rca_body)
+        r = client.post("/remediations", json=rca_body, headers=headers)
         print(
             f"\n3. POST /remediations (RCA's own recommendation)  -> {r.status_code} "
             f"({r.json()['detail'][:60]}...)"
         )
 
-        r = client.post("/remediations", json=_operator_body(report, inv))
+        r = client.post("/remediations", json=_operator_body(report, inv), headers=headers)
         rid = r.json()["remediation_id"]
         print(
             f"4. POST /remediations (operator: RESTART_SERVICE) -> {r.status_code} "
             f"status={r.json()['status']}  id={rid}"
         )
 
-        r = client.post(f"/remediations/{rid}/execute", json={})
+        r = client.post(f"/remediations/{rid}/execute", json={}, headers=headers)
         print(
             f"5. POST /execute BEFORE approval                 -> {r.status_code} "
             f"(human-in-the-loop guard)"
@@ -322,13 +344,14 @@ def _happy_path(report: Any, inv: Any) -> None:
                 "approver_role": "ADMINISTRATOR",
                 "reason": "Reviewed the RCA; a restart is the minimal safe action.",
             },
+            headers=headers,
         )
         print(
             f"6. POST /approve (ADMINISTRATOR)                 -> {r.status_code} "
             f"status={r.json()['status']}"
         )
 
-        r = client.post(f"/remediations/{rid}/execute", json={})
+        r = client.post(f"/remediations/{rid}/execute", json={}, headers=headers)
         ex = r.json()["execution"]
         print(
             f"7. POST /execute                                -> {r.status_code} "
@@ -336,22 +359,22 @@ def _happy_path(report: Any, inv: Any) -> None:
         )
         print(f"   simulated effect: {ex['simulated_effect']}")
 
-        r = client.post(f"/remediations/{rid}/verify-recovery", json={})
+        r = client.post(f"/remediations/{rid}/verify-recovery", json={}, headers=headers)
         v = r.json()["verification"]
         print(
             f"8. POST /verify-recovery                        -> {r.status_code} "
             f"status={r.json()['status']}  attempts={v['attempts']}  verifier={v['verifier_type']}"
         )
 
-        audit = client.get(f"/remediations/{rid}/audit").json()
+        audit = client.get(f"/remediations/{rid}/audit", headers=headers).json()
         print(
             f"9. GET /audit  ({audit['count']} immutable events): "
             f"{[e['event_type'] for e in audit['events']]}"
         )
 
         # idempotency
-        dup_exec = client.post(f"/remediations/{rid}/execute", json={}).status_code
-        dup_ver = client.post(f"/remediations/{rid}/verify-recovery", json={})
+        dup_exec = client.post(f"/remediations/{rid}/execute", json={}, headers=headers).status_code
+        dup_ver = client.post(f"/remediations/{rid}/verify-recovery", json={}, headers=headers)
         replayed = dup_ver.json()["verification"]["verification_id"] == v["verification_id"]
         print(
             f"10. duplicate /execute -> {dup_exec}   "
@@ -366,29 +389,33 @@ def _happy_path(report: Any, inv: Any) -> None:
 def _rejection_and_failure_paths(report: Any, inv: Any) -> None:
     producer = _CapturingProducer()
     with _client(producer) as client:
-        rid = client.post("/remediations", json=_operator_body(report, inv)).json()[
-            "remediation_id"
-        ]
+        headers = _demo_auth_headers()
+        rid = client.post(
+            "/remediations", json=_operator_body(report, inv), headers=headers
+        ).json()["remediation_id"]
         client.post(
             f"/remediations/{rid}/reject",
             json={"approver_identity": "sre@x", "approver_role": "OPERATOR", "reason": "not now"},
+            headers=headers,
         )
-        after = client.post(f"/remediations/{rid}/execute", json={}).status_code
+        after = client.post(f"/remediations/{rid}/execute", json={}, headers=headers).status_code
         print(f"\n12. rejection path: REJECTED then /execute -> {after} (rejected never runs)")
 
     chronic = SimulationState()
     chronic.inject_fault("orders-service", chronic=True)
     producer2 = _CapturingProducer()
     with _client(producer2, state=chronic) as client:
-        rid = client.post("/remediations", json=_operator_body(report, inv)).json()[
-            "remediation_id"
-        ]
+        headers = _demo_auth_headers()
+        rid = client.post(
+            "/remediations", json=_operator_body(report, inv), headers=headers
+        ).json()["remediation_id"]
         client.post(
             f"/remediations/{rid}/approve",
             json={"approver_identity": "a@x", "approver_role": "ADMINISTRATOR"},
+            headers=headers,
         )
-        client.post(f"/remediations/{rid}/execute", json={})
-        r = client.post(f"/remediations/{rid}/verify-recovery", json={})
+        client.post(f"/remediations/{rid}/execute", json={}, headers=headers)
+        r = client.post(f"/remediations/{rid}/verify-recovery", json={}, headers=headers)
         reason = r.json()["verification"]["failure_reason"][:70]
         print(
             f"13. recovery-failed path: chronic fault -> verify-recovery -> "

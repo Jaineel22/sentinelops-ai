@@ -304,6 +304,12 @@ services:
     build:
       context: .
       dockerfile: apps/frontend/Dockerfile
+      args:
+        INCIDENT_API_URL: http://incident-correlator:8000
+        RCA_API_URL: http://rca-agent:8000
+        REMEDIATION_API_URL: http://remediation-controller:8000
+        DETECTOR_API_URL: http://anomaly-detector:8000
+        AUTH_API_URL: http://api:8000
     ports:
       - "3100:3000"
     environment:

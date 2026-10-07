@@ -1,10 +1,12 @@
 # SentinelOps AI
 
-> **Current status: Phase 11 deployment foundation delivered.**
-> Phases 0–10 are implemented; Phase 11 infrastructure, Helm, Terraform,
-> security CI, deployment workflows, and load-test scenarios are present.
-> Local/cloud execution remains environment-dependent and is reported
-> explicitly rather than implied by the documentation.
+> **Current status: Phase 11 deployment foundation delivered and the core local
+> Docker demo verified.** Phases 0–10 are implemented; Phase 11 infrastructure,
+> Helm, Terraform, security CI, deployment workflows, and load-test scenarios
+> are present. The core Compose stack has been built and smoke-tested locally.
+> AWS/Kubernetes execution and k6 performance runs remain environment-dependent
+> and are reported separately.
+
 
 ## Live LLM Demo
 
@@ -708,16 +710,16 @@ frontend-{install,dev,build,lint}`. Details:
 [docs/phase10-summary.md](docs/phase10-summary.md) ·
 [apps/frontend/README.md](apps/frontend/README.md).
 
-### Phase 11 — Deployment foundation *(delivered; live execution pending)*
+### Phase 11 — Deployment foundation *(delivered; local core stack verified)*
 
 Phase 11 now includes raw Kubernetes manifests, a values-driven Helm chart,
 Kind bootstrap, cost-conscious Terraform modules for VPC/EKS/RDS/S3/ECR/IRSA,
 Trivy and Terraform CI, an OIDC-based EKS deployment workflow, Kind E2E
 validation, and k6 scenarios. Start with
 [the Kubernetes guide](docs/deployment/kubernetes.md) and
-[the Terraform guide](docs/deployment/terraform.md). Cloud, cluster, and load
-tests are intentionally not claimed as run unless their tools and credentials
-are available.
+[the Terraform guide](docs/deployment/terraform.md). The core Docker Compose
+stack has been verified locally; cloud, cluster, and k6 performance tests are
+not claimed unless their tools and credentials are available.
 
 **Not implemented** (later phases): the full observability stack — Loki (logs) /
 Tempo (traces) / an OTel collector / cross-service instrumentation beyond the

@@ -24,6 +24,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
 import httpx
@@ -102,6 +104,24 @@ _HISTORY = [
         "created_at": "2026-09-01T12:01:00Z",
     }
 ]
+
+
+def _demo_auth_headers() -> dict[str, str]:
+    import jwt
+
+    secret = os.environ.get("JWT_SECRET_KEY")
+    if not secret:
+        raise RuntimeError("JWT_SECRET_KEY must be set for the protected RCA demo")
+    token = jwt.encode(
+        {
+            "sub": "demo-admin",
+            "role": "admin",
+            "exp": datetime.now(UTC) + timedelta(minutes=5),
+        },
+        secret,
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _incident_api(request: httpx.Request) -> httpx.Response:
@@ -196,7 +216,8 @@ def _report(repo: InMemoryInvestigationRepository) -> None:
         run_consumer=False,
     )
     with TestClient(app) as client:
-        got = client.get(f"/incidents/{_INCIDENT_ID}/investigation")
+        headers = _demo_auth_headers()
+        got = client.get(f"/incidents/{_INCIDENT_ID}/investigation", headers=headers)
         assert got.status_code == 200, got.text
         detail = got.json()
         inv, report = detail["investigation"], detail["report"]
@@ -225,7 +246,7 @@ def _report(repo: InMemoryInvestigationRepository) -> None:
             f"{[s.split(':')[0] for s in report['unavailable_evidence_sources']]}"
         )
 
-        by_id = client.get(f"/investigations/{inv['id']}")
+        by_id = client.get(f"/investigations/{inv['id']}", headers=headers)
         assert by_id.status_code == 200
 
         known = {e["id"] for e in report["evidence"]}

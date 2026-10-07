@@ -1,6 +1,6 @@
 # Development Setup
 
-Every command here works today (through Phase 4). Windows (PowerShell and Git
+Every command here works today through the current local Docker demo. Windows (PowerShell and Git
 Bash) and Unix instructions are given.
 
 ## Prerequisites
@@ -69,7 +69,28 @@ uvicorn sentinelops_api.main:app --reload --app-dir apps/api
 - Root:   <http://localhost:8000/>
 - OpenAPI docs: <http://localhost:8000/docs>
 
-## 6. Phase 1: the event pipeline (Kafka + orders-service)
+## 6. Local Docker demo: complete core platform
+
+Start the verified core stack without optional observability services:
+
+```bash
+export JWT_SECRET_KEY="$(openssl rand -hex 32)"
+docker compose up --build -d \
+  api kafka postgres orders-service orders-consumer \
+  incident-migrate rca-migrate remediation-migrate \
+  incident-correlator anomaly-detector rca-agent \
+  remediation-controller frontend
+docker compose ps
+```
+
+Open <http://localhost:3100>. The demo accounts are `admin` / `admin123`,
+`approver` / `approver123`, and `viewer` / `viewer123`. See
+[docs/demo.md](../demo.md) for the faculty presentation flow.
+
+The optional MLflow, Prometheus, and Grafana services are not required.
+MLflow uses host port `5000`; on macOS this can be occupied by Control Center.
+
+## 7. Phase 1: the event pipeline (Kafka + orders-service)
 
 Start everything in Docker:
 
@@ -111,7 +132,7 @@ should do to metrics, traces, and logs.
 
 Tear down: `docker compose down` (add `-v` to drop volumes).
 
-## 7. Tests
+## 8. Tests
 
 ```bash
 pytest                     # unit tests (no broker needed) — or: make test
@@ -401,7 +422,7 @@ Run `make help` for the full list. Common ones:
 
 On PowerShell, use the explicit commands instead of `make`.
 
-## 12. Docker
+## 13. Docker
 
 ```bash
 docker build -t sentinelops-ai:api .                                   # platform API
@@ -409,13 +430,13 @@ docker build -f apps/orders-service/Dockerfile -t sentinelops-ai:orders-service 
 docker build -f ml/Dockerfile -t sentinelops-ai:ml .                   # ML experiment runner
 docker build -f services/incident-correlator/Dockerfile -t sentinelops-ai:incident-correlator .
 docker build -f services/anomaly-detector/Dockerfile -t sentinelops-ai:anomaly-detector .
-docker compose up --build                                              # full env (Phases 1 + 3)
+docker compose up --build -d                                           # full Compose definition
 
 # run the ML experiments in the container, writing to the host artifacts/ dir
 docker run --rm -v "$PWD/artifacts:/app/artifacts" sentinelops-ai:ml run all
 ```
 
-## 13. Git workflow
+## 14. Git workflow
 
 - `main` is protected; work on branches: `git switch -c phase-<n>/<short-topic>`.
 - Keep commits small and scoped; run `make check` before pushing.

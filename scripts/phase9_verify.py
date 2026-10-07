@@ -24,6 +24,7 @@ import io
 import logging
 import os
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,26 @@ class _Checker:
 
     def check(self, cond: bool, ok_msg: str, bad_msg: str) -> None:
         self.ok(ok_msg) if cond else self.bad(bad_msg)
+
+
+def _demo_auth_headers() -> dict[str, str]:
+    """Build a short-lived admin token for protected in-process API routes."""
+
+    import jwt
+
+    secret = os.environ.get("JWT_SECRET_KEY")
+    if not secret:
+        raise RuntimeError("JWT_SECRET_KEY must be set for the protected RCA demo")
+    token = jwt.encode(
+        {
+            "sub": "demo-admin",
+            "role": "admin",
+            "exp": datetime.now(UTC) + timedelta(minutes=5),
+        },
+        secret,
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _cited_ok(report: Any) -> bool:
@@ -155,7 +176,8 @@ async def _e2e_scenario(chk: _Checker) -> None:
         run_consumer=False,
     )
     with TestClient(app) as client:
-        by_incident = client.get(f"/incidents/{e2e._INCIDENT_ID}/investigation")
+        headers = _demo_auth_headers()
+        by_incident = client.get(f"/incidents/{e2e._INCIDENT_ID}/investigation", headers=headers)
         chk.check(
             by_incident.status_code == 200,
             "GET /incidents/{id}/investigation works",
@@ -169,7 +191,7 @@ async def _e2e_scenario(chk: _Checker) -> None:
             f"GET /investigations/{{id}} returns an RCA report (status={rpt_status})",
             "investigation detail carries no RCA report",
         )
-        by_id = client.get(f"/investigations/{detail['investigation']['id']}")
+        by_id = client.get(f"/investigations/{detail['investigation']['id']}", headers=headers)
         chk.check(
             by_id.status_code == 200,
             "GET /investigations/{id} works",
@@ -196,6 +218,7 @@ def _live_api(chk: _Checker, url: str) -> None:
 
     url = url.rstrip("/")
     print(f"\n3. Investigation API ({url})")
+    headers = _demo_auth_headers()
     try:
         with httpx.Client(base_url=url, timeout=10.0) as client:
             health = client.get("/health")
@@ -204,13 +227,15 @@ def _live_api(chk: _Checker, url: str) -> None:
                 f"GET /health -> {health.status_code}",
                 f"GET /health -> {health.status_code}",
             )
-            missing_inv = client.get("/investigations/rca_deadbeefdeadbeef")
+            missing_inv = client.get("/investigations/rca_deadbeefdeadbeef", headers=headers)
             chk.check(
                 missing_inv.status_code == 404,
                 "GET /investigations/{id} route wired (404 for unknown id)",
                 f"GET /investigations/{{id}} -> {missing_inv.status_code} (expected 404)",
             )
-            missing_for_incident = client.get("/incidents/inc_deadbeefdeadbeef/investigation")
+            missing_for_incident = client.get(
+                "/incidents/inc_deadbeefdeadbeef/investigation", headers=headers
+            )
             chk.check(
                 missing_for_incident.status_code == 404,
                 "GET /incidents/{id}/investigation route wired (404 for unknown id)",
