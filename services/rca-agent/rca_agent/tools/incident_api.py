@@ -12,6 +12,7 @@ Every failure mode maps to a typed error carrying a **sanitized** message
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -55,15 +56,28 @@ class IncidentApiMalformed(IncidentApiError):
 
 
 class IncidentApiClient:
-    def __init__(self, base_url: str, *, client: httpx.AsyncClient, timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        client: httpx.AsyncClient,
+        timeout: float = 10.0,
+        token_provider: Callable[[], str] | None = None,
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._client = client
         self._timeout = timeout
+        self._token_provider = token_provider
 
     async def _get_json(self, path: str, params: dict[str, str] | None = None) -> object:
         try:
+            headers = (
+                {"Authorization": f"Bearer {self._token_provider()}"}
+                if self._token_provider is not None
+                else None
+            )
             resp = await self._client.get(
-                f"{self._base}{path}", params=params, timeout=self._timeout
+                f"{self._base}{path}", params=params, headers=headers, timeout=self._timeout
             )
         except httpx.TimeoutException as exc:
             raise IncidentApiTimeout("the incident API request timed out") from exc

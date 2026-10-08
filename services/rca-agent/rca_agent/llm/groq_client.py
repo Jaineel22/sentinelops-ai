@@ -6,7 +6,6 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
-import groq
 from pydantic import BaseModel, ValidationError
 
 from rca_agent.config import Settings
@@ -52,9 +51,17 @@ class GroqLlmClient:
         self._max_output_tokens = max_output_tokens
         self._timeout_seconds = timeout_seconds
         self._max_prompt_chars = max_prompt_chars
+        self._groq: Any = None
         if _completion_create is not None:
             self._create = _completion_create
         else:
+            try:
+                import groq
+            except ImportError as exc:
+                raise LlmConfigurationError(
+                    "Install the 'rca' extra to use RCA_MODE=live with LLM_PROVIDER=groq"
+                ) from exc
+            self._groq = groq
             client = groq.AsyncGroq(
                 api_key=api_key,
                 base_url=base_url,
@@ -118,18 +125,26 @@ class GroqLlmClient:
                 tools=[{"type": "function", "function": function}],
                 tool_choice={"type": "function", "function": {"name": op.tool_name}},
             )
-        except groq.APITimeoutError as exc:
-            raise LlmTimeout(
-                f"{op.name}: provider did not respond within {self._timeout_seconds}s"
-            ) from exc
-        except groq.APIConnectionError as exc:
-            raise LlmProviderError(f"{op.name}: could not reach the LLM provider") from exc
-        except groq.RateLimitError as exc:
-            raise LlmProviderError(f"{op.name}: provider rate limit exceeded") from exc
-        except groq.APIStatusError as exc:
-            raise LlmProviderError(f"{op.name}: provider returned HTTP {exc.status_code}") from exc
-        except groq.GroqError as exc:
-            raise LlmProviderError(f"{op.name}: provider error ({type(exc).__name__})") from exc
+        except Exception as exc:
+            if self._groq is None:
+                raise
+            if isinstance(exc, self._groq.APITimeoutError):
+                raise LlmTimeout(
+                    f"{op.name}: provider did not respond within {self._timeout_seconds}s"
+                ) from exc
+            if isinstance(exc, self._groq.APIConnectionError):
+                raise LlmProviderError(f"{op.name}: could not reach the LLM provider") from exc
+            if isinstance(exc, self._groq.RateLimitError):
+                raise LlmProviderError(f"{op.name}: provider rate limit exceeded") from exc
+            if isinstance(exc, self._groq.APIStatusError):
+                raise LlmProviderError(
+                    f"{op.name}: provider returned HTTP {exc.status_code}"
+                ) from exc
+            if isinstance(exc, self._groq.GroqError):
+                raise LlmProviderError(
+                    f"{op.name}: provider error ({type(exc).__name__})"
+                ) from exc
+            raise
 
         payload = _extract_forced_tool_input(response, op)
         try:
@@ -157,6 +172,8 @@ def _extract_forced_tool_input(response: Any, op: LlmOperation) -> dict[str, Any
     for call in tool_calls:
         function = getattr(call, "function", None)
         name = getattr(function, "name", None)
+        if name == f"functions.{op.tool_name}":
+            name = op.tool_name
         if name != op.tool_name:
             raise LlmMalformedOutput(f"{op.name}: model called an unexpected tool {name!r}")
         try:

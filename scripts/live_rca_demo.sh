@@ -16,7 +16,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker compose up --build -d
+docker compose up --build -d \
+  api kafka postgres orders-service orders-consumer \
+  incident-migrate rca-migrate remediation-migrate \
+  incident-correlator anomaly-detector rca-agent \
+  remediation-controller frontend
 echo "Waiting for the incident API..."
 for _ in $(seq 1 60); do
   curl --fail --silent http://localhost:8002/health >/dev/null && break
@@ -54,4 +58,14 @@ curl --fail --silent -X POST http://localhost:8004/investigations \
 
 echo "Live RCA report for incident $incident_id:"
 curl --fail --silent -H "Authorization: Bearer $token" \
-  "http://localhost:8004/incidents/$incident_id/investigation" | python3 -m json.tool
+  "http://localhost:8004/incidents/$incident_id/investigation" |
+  python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+investigation = data["investigation"]
+print(json.dumps(data, indent=2))
+if investigation["status"] != "COMPLETED" or investigation["mode"] != "live" or not investigation.get("model"):
+    raise SystemExit("Live RCA did not complete with the configured provider")
+'

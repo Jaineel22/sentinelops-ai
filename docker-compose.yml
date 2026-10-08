@@ -200,7 +200,7 @@ services:
       KAFKA_INCIDENT_DLQ_TOPIC: incident.events.dlq
       KAFKA_CONSUMER_GROUP: rca-agent
       # mock = deterministic, no LLM API key needed. Override to "live" + set
-      # LLM_PROVIDER / LLM_API_KEY for a real provider (ADR-022).
+      # LLM_PROVIDER / LLM_API_KEY for a real Groq provider.
       RCA_MODE: ${RCA_MODE:-mock}
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
       LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}

@@ -9,9 +9,11 @@ and invokes them by :class:`ToolName` only.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
+import jwt
 from pydantic import BaseModel, ConfigDict
 
 from rca_agent.config import Settings
@@ -103,10 +105,19 @@ def build_registry(settings: Settings, *, http_client: httpx.AsyncClient) -> Too
     """Construct the registry with real HTTP-backed clients. The caller owns
     ``http_client``'s lifecycle (the 4C app lifespan; tests inject a mock)."""
 
+    def issue_read_token() -> str:
+        now = datetime.now(UTC)
+        return jwt.encode(
+            {"sub": "rca-agent", "role": "viewer", "iat": now, "exp": now + timedelta(minutes=5)},
+            settings.auth.secret_key.get_secret_value(),
+            algorithm=settings.auth.algorithm,
+        )
+
     incident_api = IncidentApiClient(
         settings.rca.incident_api_base_url,
         client=http_client,
         timeout=settings.rca.http_timeout_seconds,
+        token_provider=issue_read_token,
     )
     metrics = ServiceMetricsClient(
         settings.rca.service_metrics_urls,
